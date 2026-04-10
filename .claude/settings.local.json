@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm --version)",
+      "Bash(java --version)",
+      "Bash(java -version)",
+      "Bash(npm install:*)"
+    ]
+  }
+}

@@ -1,0 +1,54 @@
+'use strict';
+
+/**
+ * SQLite singleton using Node.js built-in `node:sqlite` (stable since Node 24).
+ * No native compilation required — no external dependencies.
+ */
+
+const path = require('path');
+const { DatabaseSync } = require('node:sqlite');
+
+// Database file — overridable via YAMS_DB env var (used by tests)
+const DB_PATH = process.env.YAMS_DB || path.join(__dirname, '..', 'yams.db');
+
+let _db = null;
+
+/**
+ * Returns the single shared database connection.
+ * Opens + migrates on first call; subsequent calls return the cached instance.
+ */
+function getDb() {
+  if (!_db) {
+    _db = new DatabaseSync(DB_PATH);
+
+    // WAL mode gives better read concurrency and is safer on power loss
+    _db.exec("PRAGMA journal_mode = WAL");
+    _db.exec("PRAGMA foreign_keys = ON");
+
+    migrate(_db);
+  }
+  return _db;
+}
+
+/**
+ * Runs idempotent schema migrations.
+ * Add future migrations here as additional exec() calls.
+ */
+function migrate(db) {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS servers (
+      id          TEXT    PRIMARY KEY,
+      name        TEXT    NOT NULL UNIQUE,
+      path        TEXT    NOT NULL,
+      port        INTEGER NOT NULL UNIQUE,
+      ram         TEXT    NOT NULL DEFAULT '1G',
+      status      TEXT    NOT NULL DEFAULT 'stopped'
+                          CHECK (status IN ('stopped', 'running')),
+      pid         INTEGER,
+      created_at  TEXT    NOT NULL DEFAULT (datetime('now')),
+      updated_at  TEXT    NOT NULL DEFAULT (datetime('now'))
+    );
+  `);
+}
+
+module.exports = { getDb };

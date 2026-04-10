@@ -1,0 +1,25 @@
+# Dependencies
+node_modules/
+
+# Database files
+yams.db
+yams.db-wal
+yams.db-shm
+
+# Server runtime artifacts (keep the servers/ folder itself tracked)
+servers/*/logs/
+servers/*/crash-reports/
+servers/*/world/
+servers/*/world_nether/
+servers/*/world_the_end/
+servers/*/usercache.json
+servers/*/banned-ips.json
+servers/*/banned-players.json
+servers/*/ops.json
+servers/*/whitelist.json
+
+# Logs
+*.log
+
+# Environment variables
+.env

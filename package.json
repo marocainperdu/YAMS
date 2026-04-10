@@ -1,0 +1,19 @@
+{
+  "name": "yams",
+  "version": "1.0.0",
+  "description": "Yet Another Minecraft Server Manager — local self-hosted server management API",
+  "main": "app.js",
+  "scripts": {
+    "start": "node --disable-warning=ExperimentalWarning app.js",
+    "dev": "node --watch --disable-warning=ExperimentalWarning app.js",
+    "test": "node --disable-warning=ExperimentalWarning --test test.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "swagger-ui-express": "^5.0.1",
+    "uuid": "^9.0.1"
+  },
+  "engines": {
+    "node": ">=22.5.0"
+  }
+}
