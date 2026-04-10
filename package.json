@@ -11,7 +11,8 @@
   "dependencies": {
     "express": "^4.19.2",
     "swagger-ui-express": "^5.0.1",
-    "uuid": "^9.0.1"
+    "uuid": "^9.0.1",
+    "ws": "^8.20.0"
   },
   "engines": {
     "node": ">=22.5.0"

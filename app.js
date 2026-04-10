@@ -16,6 +16,7 @@ require('./src/services/serverService');
 
 const serverRoutes = require('./src/routes/serverRoutes');
 const swaggerSpec = require('./src/swagger');
+const { createWsServer } = require('./src/websocket/wsServer');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -83,6 +84,9 @@ app.listen(PORT, () => {
   console.log('  POST   /servers/:id/start');
   console.log('  POST   /servers/:id/stop');
   console.log(`[YAMS] Swagger UI → http://localhost:${PORT}/api-docs`);
+
+  // Start the WebSocket console server alongside the HTTP API
+  createWsServer();
 });
 
 module.exports = app;

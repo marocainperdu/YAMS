@@ -1,5 +1,6 @@
 # Dependencies
 node_modules/
+.claude/
 
 # Database files
 yams.db
@@ -23,3 +24,4 @@ servers/*/whitelist.json
 
 # Environment variables
 .env
+.claude/settings.local.json

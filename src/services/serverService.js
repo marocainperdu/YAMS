@@ -12,6 +12,7 @@
 
 const path = require('path');
 const { spawn } = require('child_process');
+const { EventEmitter } = require('events');
 const { v4: uuidv4 } = require('uuid');
 
 const serverModel = require('../models/serverModel');
@@ -21,11 +22,82 @@ const { badRequest, notFound, conflict, internal } = require('../utils/errors');
 // Root directory where all server folders live — overridable via env var (used by tests)
 const SERVERS_ROOT = process.env.YAMS_SERVERS_ROOT || path.join(__dirname, '..', '..', 'servers');
 
+// ─── Configuration ──────────────────────────────────────────────────────────
+// Maximum number of log lines to buffer per server (configurable via env)
+const LOG_BUFFER_SIZE = process.env.LOG_BUFFER_SIZE ? parseInt(process.env.LOG_BUFFER_SIZE, 10) : 100;
+
+// Maximum time (ms) a client can wait in pending state before being disconnected (5 minutes)
+const PENDING_CLIENT_TIMEOUT_MS = process.env.PENDING_CLIENT_TIMEOUT_MS ? parseInt(process.env.PENDING_CLIENT_TIMEOUT_MS, 10) : 5 * 60 * 1000;
+
+// Maximum buffered bytes (ws.bufferedAmount) before we stop sending logs to a client
+// This prevents slow clients from causing memory bloat in the server.
+const BACKPRESSURE_BUFFER_LIMIT = 1_000_000; // 1 MB
+
+// Event emitter for decoupling service from WebSocket transport.
+// wsServer listens to these events instead of the service directly managing clients.
+const streamEmitter = new EventEmitter();
+
 /**
- * Map<serverId, { child: ChildProcess, name: string }>
+ * Map<serverId, { child: ChildProcess, name: string, clients: Set<WebSocket> }>
  * Only populated for servers whose process is currently alive.
+ * `clients` holds all WebSocket connections subscribed to that server's log stream.
  */
 const processes = new Map();
+
+// WebSocket.OPEN value per the WS spec (avoids importing `ws` here just for the constant)
+const WS_OPEN = 1;
+
+/**
+ * Broadcast a JSON message to every WebSocket client subscribed to a server.
+ * Applies backpressure: skips clients with large buffered amounts to prevent OOM.
+ * @param {string} id   Server UUID
+ * @param {object} msg  Object that will be JSON-serialised before sending
+ */
+function broadcastToClients(id, msg) {
+  const entry = processes.get(id);
+  if (!entry || entry.clients.size === 0) return;
+  const json = JSON.stringify(msg);
+  for (const ws of entry.clients) {
+    if (ws.readyState === WS_OPEN && ws.bufferedAmount < BACKPRESSURE_BUFFER_LIMIT) {
+      ws.send(json);
+    }
+  }
+}
+
+/**
+ * Map<serverId, Set<WebSocket>>
+ * Clients that subscribed while the server was stopped — flushed into the
+ * active `clients` Set the moment the server process starts.
+ * NOTE: To prevent memory leaks, each ws in pendingClients has a timeout attached
+ * via ws.pendingTimeout; see subscribe() for details.
+ */
+const pendingClients = new Map();
+
+/**
+ * Single write path for all stdout/stderr output from child processes.
+ * Appends to the server's ring buffer then fans out to every active client.
+ *
+ * NOTE: duplicate listener risk — each startServer() call spawns a fresh
+ * ChildProcess; listeners are attached to the new child's streams, never to
+ * an already-listening stream.  The `processes.has(id)` guard at the top of
+ * startServer() prevents two calls from racing on the same server id.
+ *
+ * @param {string}            id    Server UUID (key in the processes Map)
+ * @param {'stdout'|'stderr'} type  Which stream the data came from
+ * @param {string}            data  Raw text chunk from the child process
+ */
+function pushLog(id, type, data) {
+  const entry = processes.get(id);
+  if (!entry) return;
+
+  const msg = { type, serverId: id, timestamp: Date.now(), data };
+
+  // Ring buffer — drop the oldest line once capacity is reached
+  entry.logs.push(msg);
+  if (entry.logs.length > LOG_BUFFER_SIZE) entry.logs.shift();
+
+  broadcastToClients(id, msg);
+}
 
 // ---------------------------------------------------------------------------
 // Startup reconciliation
@@ -176,8 +248,10 @@ function startServer(id) {
   }
 
   // Register process in memory BEFORE updating DB so the exit handler
-  // (attached immediately below) has a consistent Map entry to clean up
-  processes.set(id, { child, name: server.name });
+  // (attached immediately below) has a consistent Map entry to clean up.
+  // `clients` starts empty and is populated via subscribe().
+  // `logs` is the ring buffer replayed to late-joining clients.
+  processes.set(id, { child, name: server.name, clients: new Set(), logs: [] });
 
   // Update DB to reflect running state
   try {
@@ -191,22 +265,31 @@ function startServer(id) {
 
   // --- Process lifecycle event handlers ---
 
-  // Pipe server stdout/stderr to the YAMS process stdout so logs are visible
+  // stdout: pipe to YAMS process stdout for local visibility, and push to the
+  // ring buffer + broadcast to all subscribed WS clients via pushLog.
   child.stdout.on('data', (data) => {
-    process.stdout.write(`[${server.name}] ${data}`);
+    const line = data.toString();
+    process.stdout.write(`[${server.name}] ${line}`);
+    pushLog(id, 'stdout', line);
   });
 
+  // stderr: same pipeline, tagged 'stderr' so clients can style or filter it.
   child.stderr.on('data', (data) => {
-    process.stderr.write(`[${server.name}] ERROR: ${data}`);
+    const line = data.toString();
+    process.stderr.write(`[${server.name}] ERROR: ${line}`);
+    pushLog(id, 'stderr', line);
   });
 
-  // Handles both graceful shutdown and unexpected crashes
+  // Handles both graceful shutdown and unexpected crashes.
+  // Entry is still in Map here only when the process exits on its own (crash,
+  // OOM, etc.).  stopServer() removes the entry before signalling the process,
+  // so a clean API-driven stop does NOT reach this branch.
   child.on('exit', (code, signal) => {
-    const wasInMap = processes.has(id);
-    processes.delete(id);
-
-    // Only update DB if we haven't already cleaned up (e.g. via stopServer)
-    if (wasInMap) {
+    const entry = processes.get(id);
+    if (entry) {
+      // Notify clients before clearing the entry so broadcastToClients can still find them
+      broadcastToClients(id, { type: 'status', serverId: id, timestamp: Date.now(), data: 'stopped' });
+      processes.delete(id);
       serverModel.updateStatus(id, 'stopped', null);
       console.log(
         `[YAMS] Server '${server.name}' exited — code: ${code ?? 'null'}, signal: ${signal ?? 'null'}`
@@ -217,9 +300,32 @@ function startServer(id) {
   // Handles OS-level spawn errors (ENOENT, EACCES, etc.)
   child.on('error', (err) => {
     console.error(`[YAMS] Spawn error for server '${server.name}': ${err.message}`);
+    broadcastToClients(id, { type: 'status', serverId: id, timestamp: Date.now(), data: 'stopped' });
     processes.delete(id);
     serverModel.updateStatus(id, 'stopped', null);
   });
+
+  // Promote any WS clients that subscribed while this server was stopped.
+  // Now that the process is live and handlers are attached, move them from
+  // pendingClients into the active clients Set and tell them it started.
+  const pendingSet = pendingClients.get(id);
+  if (pendingSet && pendingSet.size > 0) {
+    const entry = processes.get(id);
+    for (const ws of pendingSet) {
+      if (ws.readyState === WS_OPEN) {
+        // Clear the pending timeout now that the server has started
+        if (ws.pendingTimeout) {
+          clearTimeout(ws.pendingTimeout);
+          ws.pendingTimeout = null;
+        }
+        entry.clients.add(ws);
+      }
+    }
+    pendingClients.delete(id);
+    // Notify all promoted clients (buffer is empty at this point — server just started)
+    broadcastToClients(id, { type: 'status', serverId: id, timestamp: Date.now(), data: 'started', server: server.name });
+    console.log(`[YAMS] Promoted ${pendingSet.size} pending WS client(s) for server '${server.name}'`);
+  }
 
   console.log(`[YAMS] Started server '${server.name}' (PID: ${child.pid})`);
   return serverModel.findById(id);
@@ -251,8 +357,11 @@ function stopServer(id) {
   if (entry) {
     const { child } = entry;
 
-    // Remove from Map FIRST to prevent the exit handler from doing a
-    // redundant DB update after we update it ourselves below
+    // Notify clients BEFORE removing from Map so broadcastToClients can still
+    // find the entry.  The stop signal follows immediately after.
+    broadcastToClients(id, { type: 'status', serverId: id, timestamp: Date.now(), data: 'stopped' });
+
+    // Remove from Map so the exit handler does not do a redundant DB update
     processes.delete(id);
 
     // Attempt graceful shutdown via Minecraft's built-in 'stop' command
@@ -282,6 +391,106 @@ function stopServer(id) {
   return serverModel.findById(id);
 }
 
+// ---------------------------------------------------------------------------
+// WebSocket client management
+// All subscription state lives here, co-located with the processes Map.
+// wsServer.js calls these functions; it never touches processes or pendingClients directly.
+// ---------------------------------------------------------------------------
+
+/**
+ * Subscribe a WebSocket client to a server's console stream.
+ *
+ * Three possible outcomes:
+ *   { status: 'subscribed', serverName, logs }  — server is running; `logs` is the
+ *                                                  buffered history to replay immediately.
+ *   { status: 'pending',    serverName }         — server exists but is stopped; client
+ *                                                  is queued and gets promoted automatically
+ *                                                  when startServer() is called next.
+ *   false                                         — serverId not found in DB.
+ *
+ * Idempotent for the same (serverId, ws) pair — Set.add() is a no-op for duplicates.
+ *
+ * PENDING TIMEOUT: If a client stays pending after PENDING_CLIENT_TIMEOUT_MS,
+ * it is unsubscribed and its WebSocket should be closed by wsServer.
+ *
+ * @param {string}        serverId
+ * @param {import('ws')} ws
+ */
+function subscribe(serverId, ws) {
+  const server = serverModel.findById(serverId);
+  if (!server) return false;
+
+  const entry = processes.get(serverId);
+  if (entry) {
+    entry.clients.add(ws);
+    // Clear any pending timeout if this ws was previously in pending state
+    if (ws.pendingTimeout) clearTimeout(ws.pendingTimeout);
+    // Return a shallow copy of the buffer so the caller can replay it
+    return { status: 'subscribed', serverName: server.name, logs: [...entry.logs] };
+  }
+
+  // Server is stopped — queue the client; it will be promoted in startServer()
+  if (!pendingClients.has(serverId)) pendingClients.set(serverId, new Set());
+  pendingClients.get(serverId).add(ws);
+
+  // Attach a timeout to prevent memory leaks if server never starts.
+  // wsServer will receive 'pending_timeout' event and should close the connection.
+  ws.pendingTimeout = setTimeout(() => {
+    unsubscribe(serverId, ws);
+    streamEmitter.emit('pending_timeout', serverId, ws);
+  }, PENDING_CLIENT_TIMEOUT_MS);
+
+  return { status: 'pending', serverName: server.name };
+}
+
+/**
+ * Remove a WebSocket client from both active subscribers and the pending queue.
+ * Clears any pending timeout to prevent dangling timer references.
+ * Safe to call after the server has stopped (no-op if the client isn't tracked).
+ *
+ * @param {string}        serverId
+ * @param {import('ws')} ws
+ */
+function unsubscribe(serverId, ws) {
+  const entry = processes.get(serverId);
+  if (entry) entry.clients.delete(ws);
+
+  const pending = pendingClients.get(serverId);
+  if (pending) {
+    pending.delete(ws);
+    // Clean up the Map entry when no more pending clients remain
+    if (pending.size === 0) pendingClients.delete(serverId);
+  }
+
+  // Clear the pending timeout if this ws had one attached
+  if (ws.pendingTimeout) {
+    clearTimeout(ws.pendingTimeout);
+    ws.pendingTimeout = null;
+  }
+}
+
+/**
+ * Write a command to a running server's stdin (appends "\n" automatically).
+ * Throws an operational error if the server is not found or not running.
+ * @param {string} serverId
+ * @param {string} command  Raw Minecraft server command, e.g. "say hello"
+ */
+function sendCommand(serverId, command) {
+  const server = serverModel.findById(serverId);
+  if (!server) throw notFound(`Server '${serverId}' not found`);
+
+  const entry = processes.get(serverId);
+  if (!entry) throw conflict(`Server '${server.name}' is not running`);
+
+  const { child } = entry;
+  if (!child.stdin || child.stdin.destroyed) {
+    throw internal(`Cannot write to stdin of '${server.name}' — stream is closed`);
+  }
+
+  // Minecraft's server reads one command per line from stdin
+  child.stdin.write(`${command}\n`);
+}
+
 /** @returns {object[]} All servers from DB */
 function listServers() {
   return serverModel.findAll();
@@ -297,4 +506,11 @@ function getServer(id) {
   return server;
 }
 
-module.exports = { createServer, startServer, stopServer, listServers, getServer };
+module.exports = {
+  createServer, startServer, stopServer, listServers, getServer,
+  subscribe, unsubscribe, sendCommand,
+  streamEmitter,
+  LOG_BUFFER_SIZE,
+  PENDING_CLIENT_TIMEOUT_MS,
+  BACKPRESSURE_BUFFER_LIMIT
+};

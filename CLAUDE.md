@@ -10,6 +10,37 @@ Entries are added chronologically, newest at the top.
 
 ## Changelog
 
+### [2026-04-10 00:45] FIX/REFACTOR: WebSocket console hardening (Step 2 production-ready)
+- **Backpressure protection** (CRITICAL): `broadcastToClients()` now checks `ws.bufferedAmount < BACKPRESSURE_BUFFER_LIMIT` before sending — prevents OOM from slow clients accumulating fast logs
+- **Pending client timeout** (CRITICAL): clients waiting in `pendingClients` now auto-disconnect after `PENDING_CLIENT_TIMEOUT_MS` (default 5 min) via `ws.pendingTimeout` — prevents indefinite memory leak if server never starts
+- **Configuration via env vars**: `LOG_BUFFER_SIZE`, `PENDING_CLIENT_TIMEOUT_MS`, `BACKPRESSURE_BUFFER_LIMIT` are now overridable per-deployment
+- **Event emitter foundation** (for future decoupling): `streamEmitter` exported from `serverService` — wsServer listens to `pending_timeout` event to gracefully close zombie clients
+- **Error codes** (UX + programmatic handling): all error responses now include `code` field (`INVALID_JSON`, `SERVER_NOT_FOUND`, `INVALID_COMMAND`, `UNKNOWN_ACTION`, etc.) — clients can switch on codes instead of string matching
+- **Timeout lifecycle**: `ws.pendingTimeout` is attached in `subscribe()` when client goes pending, cleared in `unsubscribe()`, and cleared on promotion when server starts
+- **Improved cleanup**: pending client timeouts are cleared on disconnect, avoiding orphaned timers
+
+### [2026-04-10 00:30] FIX/FEAT: WebSocket console hardening (Step 2 review)
+- **Log buffer**: `logs: []` ring buffer (cap 100) added to every Map entry; replayed to late-joining clients as `{ type: "history", data: [...] }`
+- **Pending subscriptions**: `pendingClients: Map<serverId, Set<ws>>` — clients can now subscribe to a stopped server; they are promoted to active automatically when `startServer()` runs and receive a `{ type: "status", data: "started" }` push
+- **Typed streams**: stdout emits `type: "stdout"`, stderr emits `type: "stderr"` (was both `"log"`)
+- **Unified message shape**: every message carries `{ type, serverId, timestamp, data }` — timestamp injected in `send()` helper, serverId in each broadcast
+- **`pushLog(id, type, data)`**: single write path for child process output — buffers + broadcasts in one call
+- **`subscribe` / `unsubscribe`** replace `addClient` / `removeClient`; `subscribe` returns a discriminated union `{status:'subscribed'|'pending', serverName, logs?}`
+- **Re-subscribe allowed**: removed "already subscribed" guard; replaced with unsubscribe-then-subscribe so clients can recover after a server crash without reconnecting the WebSocket
+- **Heartbeat**: 30 s ping/pong interval via `ws.ping()`; dead clients (`isAlive=false`) are terminated — `close` event still fires so cleanup runs normally
+- **Duplicate listener note**: not actually a bug — listeners attach to a fresh ChildProcess on every `startServer()` call; the `processes.has(id)` guard prevents double-start races
+
+### [2026-04-10 00:00] FEAT: Real-time WebSocket console (Step 2)
+- Added `ws` npm package (no native compilation)
+- `src/websocket/wsServer.js` — standalone WebSocket server on port 3001 (WS_PORT env var)
+- Extended `processes` Map value from `{ child, name }` to `{ child, name, clients: Set }` — zero breaking changes to Step 1 API
+- `broadcastToClients(id, msg)` — internal helper; fans out JSON to all OPEN subscribers of a server
+- New exports from `serverService.js`: `addClient`, `removeClient`, `sendCommand`
+- stdout/stderr handlers now broadcast `{ type: "log", data }` to subscribers in addition to piping to YAMS stdout
+- exit/error/stop handlers broadcast `{ type: "status", data: "stopped" }` before clearing the Map entry
+- Client protocol: subscribe first with `{ action: "subscribe", serverId }`, then send `{ action: "command", serverId, command }` or receive log/status pushes
+- Edge cases handled: non-running server subscribe, multi-client fan-out, disconnect cleanup, invalid JSON, unknown actions
+
 ### [2026-04-09 19:00] INIT: Project scaffolded
 - Initialized empty Node.js project in `d:/Documents/CODE/YAMS/`
 - Chose CommonJS module system for consistency and simplicity
