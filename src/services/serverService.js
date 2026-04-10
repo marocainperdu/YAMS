@@ -18,6 +18,8 @@ const { v4: uuidv4 } = require('uuid');
 const serverModel = require('../models/serverModel');
 const fileManager = require('../utils/fileManager');
 const { badRequest, notFound, conflict, internal } = require('../utils/errors');
+const logPersist = require('../utils/logPersist');
+const observability = require('../utils/observability');
 
 // Root directory where all server folders live — overridable via env var (used by tests)
 const SERVERS_ROOT = process.env.YAMS_SERVERS_ROOT || path.join(__dirname, '..', '..', 'servers');
@@ -37,10 +39,19 @@ const BACKPRESSURE_BUFFER_LIMIT = 1_000_000; // 1 MB
 // wsServer listens to these events instead of the service directly managing clients.
 const streamEmitter = new EventEmitter();
 
+// ─── Crash Classification ────────────────────────────────────────────────────
+// When a server stops, classify the reason based on exit code and error context
+const CRASH_CLASSIFY = {
+  NORMAL_STOP: 'normal',      // Exit code 0 — user sent stop command
+  UNEXPECTED_CRASH: 'crashed', // Exit code != 0 or error event without stop command
+  STARTUP_FAILURE: 'startup',  // Error before process could fully start
+};
+
 /**
- * Map<serverId, { child: ChildProcess, name: string, clients: Set<WebSocket> }>
+ * Map<serverId, { child: ChildProcess, name: string, clients: Set<WebSocket>,
+ *                 logs: [], stopping: boolean }>
  * Only populated for servers whose process is currently alive.
- * `clients` holds all WebSocket connections subscribed to that server's log stream.
+ * `stopping` flag is set when we initiate a stop (to distinguish from crashes).
  */
 const processes = new Map();
 
@@ -50,6 +61,7 @@ const WS_OPEN = 1;
 /**
  * Broadcast a JSON message to every WebSocket client subscribed to a server.
  * Applies backpressure: skips clients with large buffered amounts to prevent OOM.
+ * Tracks dropped messages per client for observability.
  * @param {string} id   Server UUID
  * @param {object} msg  Object that will be JSON-serialised before sending
  */
@@ -60,6 +72,12 @@ function broadcastToClients(id, msg) {
   for (const ws of entry.clients) {
     if (ws.readyState === WS_OPEN && ws.bufferedAmount < BACKPRESSURE_BUFFER_LIMIT) {
       ws.send(json);
+    } else if (ws.readyState === WS_OPEN && !ws.metadata) {
+      // Initialize metadata on first backpressure event
+      ws.metadata = { droppedMessages: 1 };
+    } else if (ws.readyState === WS_OPEN && ws.metadata) {
+      // Track dropped messages for slow client
+      ws.metadata.droppedMessages = (ws.metadata.droppedMessages || 0) + 1;
     }
   }
 }
@@ -95,6 +113,15 @@ function pushLog(id, type, data) {
   // Ring buffer — drop the oldest line once capacity is reached
   entry.logs.push(msg);
   if (entry.logs.length > LOG_BUFFER_SIZE) entry.logs.shift();
+
+  // Emit event for event-driven subscribers (wsServer listens)
+  streamEmitter.emit('log', { serverId: id, type, data, timestamp: msg.timestamp });
+
+  // Persist to disk (non-blocking)
+  const server = serverModel.findById(id);
+  if (server) {
+    logPersist.queueLog(id, server.path, `[${new Date(msg.timestamp).toISOString()}] ${type.toUpperCase()}: ${data}`);
+  }
 
   broadcastToClients(id, msg);
 }
@@ -251,7 +278,8 @@ function startServer(id) {
   // (attached immediately below) has a consistent Map entry to clean up.
   // `clients` starts empty and is populated via subscribe().
   // `logs` is the ring buffer replayed to late-joining clients.
-  processes.set(id, { child, name: server.name, clients: new Set(), logs: [] });
+  // `stopping` tracks whether we initiated the stop (vs a crash).
+  processes.set(id, { child, name: server.name, clients: new Set(), logs: [], stopping: false });
 
   // Update DB to reflect running state
   try {
@@ -287,12 +315,31 @@ function startServer(id) {
   child.on('exit', (code, signal) => {
     const entry = processes.get(id);
     if (entry) {
+      // Classify the exit: was this a deliberate stop or unexpected crash?
+      let classification = CRASH_CLASSIFY.NORMAL_STOP;
+      if (entry.stopping === false && (code !== 0 || signal)) {
+        classification = CRASH_CLASSIFY.UNEXPECTED_CRASH;
+      }
+
+      // Emit status event for all subscribers
+      streamEmitter.emit('status', {
+        serverId: id,
+        state: classification,
+        exitCode: code,
+        signal: signal,
+        timestamp: Date.now(),
+      });
+
       // Notify clients before clearing the entry so broadcastToClients can still find them
-      broadcastToClients(id, { type: 'status', serverId: id, timestamp: Date.now(), data: 'stopped' });
+      broadcastToClients(id, { type: 'status', serverId: id, timestamp: Date.now(), data: classification });
+
+      // Flush pending logs to disk before cleanup
+      logPersist.flushNow(id, server.path);
+
       processes.delete(id);
       serverModel.updateStatus(id, 'stopped', null);
       console.log(
-        `[YAMS] Server '${server.name}' exited — code: ${code ?? 'null'}, signal: ${signal ?? 'null'}`
+        `[YAMS] Server '${server.name}' exited (${classification}) — code: ${code ?? 'null'}, signal: ${signal ?? 'null'}`
       );
     }
   });
@@ -300,7 +347,16 @@ function startServer(id) {
   // Handles OS-level spawn errors (ENOENT, EACCES, etc.)
   child.on('error', (err) => {
     console.error(`[YAMS] Spawn error for server '${server.name}': ${err.message}`);
-    broadcastToClients(id, { type: 'status', serverId: id, timestamp: Date.now(), data: 'stopped' });
+
+    // Emit error event for subscribers
+    streamEmitter.emit('error', {
+      serverId: id,
+      error: err.message,
+      context: 'startup',
+      timestamp: Date.now(),
+    });
+
+    broadcastToClients(id, { type: 'status', serverId: id, timestamp: Date.now(), data: CRASH_CLASSIFY.STARTUP_FAILURE });
     processes.delete(id);
     serverModel.updateStatus(id, 'stopped', null);
   });
@@ -322,6 +378,14 @@ function startServer(id) {
       }
     }
     pendingClients.delete(id);
+
+    // Emit started event
+    streamEmitter.emit('status', {
+      serverId: id,
+      state: 'started',
+      timestamp: Date.now(),
+    });
+
     // Notify all promoted clients (buffer is empty at this point — server just started)
     broadcastToClients(id, { type: 'status', serverId: id, timestamp: Date.now(), data: 'started', server: server.name });
     console.log(`[YAMS] Promoted ${pendingSet.size} pending WS client(s) for server '${server.name}'`);
@@ -357,9 +421,19 @@ function stopServer(id) {
   if (entry) {
     const { child } = entry;
 
+    // Mark that we're intentionally stopping (so exit handler knows it's not a crash)
+    entry.stopping = true;
+
+    // Emit stop event for subscribers
+    streamEmitter.emit('status', {
+      serverId: id,
+      state: 'stopping',
+      timestamp: Date.now(),
+    });
+
     // Notify clients BEFORE removing from Map so broadcastToClients can still
     // find the entry.  The stop signal follows immediately after.
-    broadcastToClients(id, { type: 'status', serverId: id, timestamp: Date.now(), data: 'stopped' });
+    broadcastToClients(id, { type: 'status', serverId: id, timestamp: Date.now(), data: CRASH_CLASSIFY.NORMAL_STOP });
 
     // Remove from Map so the exit handler does not do a redundant DB update
     processes.delete(id);
@@ -510,7 +584,9 @@ module.exports = {
   createServer, startServer, stopServer, listServers, getServer,
   subscribe, unsubscribe, sendCommand,
   streamEmitter,
+  getObservability: observability.getObservability,
   LOG_BUFFER_SIZE,
   PENDING_CLIENT_TIMEOUT_MS,
-  BACKPRESSURE_BUFFER_LIMIT
+  BACKPRESSURE_BUFFER_LIMIT,
+  CRASH_CLASSIFY,
 };

@@ -24,3 +24,15 @@ servers/*/whitelist.json
 
 # Environment variables
 .env
+
+# Client
+
+client/node_modules
+client/.vite
+client/dist
+client/.env
+client/.env.local
+client/.env.*.local
+client/*.log
+client/.DS_Store
+client/Thumbs.db

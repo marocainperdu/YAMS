@@ -43,7 +43,8 @@
  */
 
 const WebSocket = require('ws');
-const { subscribe, unsubscribe, sendCommand, streamEmitter } = require('../services/serverService');
+const { subscribe, unsubscribe, sendCommand, streamEmitter, getObservability, CRASH_CLASSIFY } = require('../services/serverService');
+const observability = require('../utils/observability');
 
 const WS_PORT = process.env.WS_PORT || 3001;
 
@@ -68,6 +69,24 @@ const ERROR_CODES = {
  */
 function createWsServer() {
   const wss = new WebSocket.Server({ port: WS_PORT });
+
+  // ── Event listeners for service-level events ───────────────────────────────
+  // Listen to server lifecycle events and stream them to connected clients.
+  // This decouples the service layer from WebSocket specifics.
+
+  streamEmitter.on('log', (logEvent) => {
+    // Logs are already broadcast via pushLog()
+    // This hook is available for future features (e.g., log filtering, metrics)
+  });
+
+  streamEmitter.on('status', (statusEvent) => {
+    // Status events (started, crashed, normal, stopping) — already broadcast
+    // Available for monitoring/metrics collection
+  });
+
+  streamEmitter.on('error', (errorEvent) => {
+    console.error(`[YAMS] Error event from server ${errorEvent.serverId}: ${errorEvent.error}`);
+  });
 
   // ── Event listeners ──────────────────────────────────────────────────────
   // Listen for pending clients that timeout while waiting for a server to start.
@@ -99,9 +118,21 @@ function createWsServer() {
 
   // ── Per-connection logic ─────────────────────────────────────────────────
   wss.on('connection', (ws) => {
+    // ── Connection metadata ──────────────────────────────────────────────────
+    // Track metadata for debugging and monitoring
+    ws.metadata = {
+      connectionTime: Date.now(),
+      lastPong: Date.now(),
+      droppedMessages: 0,
+      subscribedServerId: null,
+    };
+
     // Reset alive flag on each pong so the heartbeat knows the client is healthy
     ws.isAlive = true;
-    ws.on('pong', () => { ws.isAlive = true; });
+    ws.on('pong', () => {
+      ws.isAlive = true;
+      ws.metadata.lastPong = Date.now();
+    });
 
     // Tracks the server this connection is subscribed to.
     // Stored here so the 'close' handler can clean up without another round-trip.
@@ -124,7 +155,12 @@ function createWsServer() {
             unsubscribe(subscribedServerId, ws);
             subscribedServerId = null;
           }
-          handleSubscribe(ws, msg, (id) => { subscribedServerId = id; });
+          handleSubscribe(ws, msg, (id) => {
+            subscribedServerId = id;
+            ws.metadata.subscribedServerId = id;
+            // Update observability: track this subscription
+            updateObservabilityStats();
+          });
           break;
 
         case 'command':
@@ -142,6 +178,9 @@ function createWsServer() {
         unsubscribe(subscribedServerId, ws);
         subscribedServerId = null;
       }
+      ws.metadata.subscribedServerId = null;
+      // Update observability: this client disconnected
+      updateObservabilityStats();
     });
 
     ws.on('error', (err) => {
@@ -231,6 +270,23 @@ function handleCommand(ws, msg) {
 }
 
 // ── Utility ──────────────────────────────────────────────────────────────────
+
+/**
+ * Update observability metrics based on service state.
+ * Called whenever client connections change.
+ */
+function updateObservabilityStats() {
+  // This is a simplified approach: compute stats from service exports
+  const stats = getObservability();
+
+  if (stats.stats.activeServers > 0 || stats.stats.totalActiveClients > 0) {
+    console.log(
+      `[YAMS] Active: ${stats.stats.activeServers} servers, ` +
+      `${stats.stats.totalActiveClients} clients, ` +
+      `${stats.stats.totalPendingClients} pending`
+    );
+  }
+}
 
 /**
  * Serialise and send a message to a single WebSocket client.

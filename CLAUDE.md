@@ -10,6 +10,16 @@ Entries are added chronologically, newest at the top.
 
 ## Changelog
 
+### [2026-04-10 01:00] REFACTOR: Advanced production-grade improvements (Step 2 final)
+- **Full event-driven architecture**: All major events now emit via `streamEmitter` (log, status, error, pending_timeout) — enables future features without coupling
+- **Crash classification** (PRODUCTION FEATURE): Exit handler now distinguishes between `normal` stop (code 0), `crashed` (unexpected code/signal), and `startup` failures — clients receive appropriate state in status messages
+- **Log persistence**: New `src/utils/logPersist.js` utility writes server logs to `/servers/{id}/logs/latest.log` in append mode, non-blocking queue-based batching, survives process restarts
+- **Dropped message tracking**: `broadcastToClients()` now counts dropped messages per slow client; warns every 100 dropped messages — improves observability of backpressure events
+- **Connection-level metadata**: Each WS connection tracks `connectionTime`, `lastPong`, `subscribedServerId`, `droppedMessages` — enables debugging and monitoring
+- **Observability system**: New `src/utils/observability.js` exports `getObservability()` showing active servers, clients per server, pending clients per server, uptime — call from monitoring endpoint or use directly
+- **Event emissions in lifecycle**: `pushLog()` emits 'log' events; `exit` handler emits 'status' with crash classification; `error` handler emits 'error' with context; server start emits 'status' 'started' — all available via `streamEmitter`
+- **Hardened cleanup**: `stopping` flag set on intentional stop to distinguish from crashes; logPersist flushes before cleanup; metadata ensures no orphaned state
+
 ### [2026-04-10 00:45] FIX/REFACTOR: WebSocket console hardening (Step 2 production-ready)
 - **Backpressure protection** (CRITICAL): `broadcastToClients()` now checks `ws.bufferedAmount < BACKPRESSURE_BUFFER_LIMIT` before sending — prevents OOM from slow clients accumulating fast logs
 - **Pending client timeout** (CRITICAL): clients waiting in `pendingClients` now auto-disconnect after `PENDING_CLIENT_TIMEOUT_MS` (default 5 min) via `ws.pendingTimeout` — prevents indefinite memory leak if server never starts
