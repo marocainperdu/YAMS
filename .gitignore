@@ -24,4 +24,3 @@ servers/*/whitelist.json
 
 # Environment variables
 .env
-.claude/settings.local.json
