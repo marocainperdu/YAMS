@@ -6,6 +6,8 @@
  */
 
 const express = require('express');
+const path    = require('path');
+const fs      = require('fs');
 const swaggerUi = require('swagger-ui-express');
 
 // Importing db.js triggers the singleton init + schema migration on startup.
@@ -46,7 +48,19 @@ app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 // Error handlers (must be registered AFTER all routes)
 // ---------------------------------------------------------------------------
 
-// 404 — no route matched
+// ── Static frontend (only active when client/dist exists — i.e. inside Docker
+//    or after a manual `npm run build` in client/). In local dev the Vite dev
+//    server handles the frontend, so this block is a no-op.
+const DIST_DIR  = path.join(__dirname, 'client', 'dist');
+const INDEX_HTML = path.join(DIST_DIR, 'index.html');
+if (fs.existsSync(INDEX_HTML)) {
+  app.use(express.static(DIST_DIR));
+  // SPA fallback — return index.html for any GET not already handled above so
+  // that client-side routing (React Router) works on direct URL access.
+  app.get('*', (_req, res) => res.sendFile(INDEX_HTML));
+}
+
+// 404 — no API route matched (non-GET requests or requests before dist exists)
 app.use((_req, res) => {
   res.status(404).json({ error: 'Route not found' });
 });
@@ -77,19 +91,22 @@ app.use((err, _req, res, _next) => {
 // Ensure DB is initialized (runs migration) before accepting connections
 getDb();
 
-app.listen(PORT, () => {
-  console.log(`[YAMS] Server manager running on http://localhost:${PORT}`);
+// Capture the http.Server so we can attach the WebSocket server to it.
+// Both HTTP and WS share the same port — no separate WS_PORT needed.
+const server = app.listen(PORT, () => {
+  console.log(`[YAMS] Running on http://localhost:${PORT}`);
   console.log('[YAMS] Endpoints:');
   console.log('  POST   /servers');
   console.log('  GET    /servers');
   console.log('  GET    /servers/:id');
   console.log('  POST   /servers/:id/start');
   console.log('  POST   /servers/:id/stop');
-  console.log(`  GET    /metrics`);
-  console.log(`[YAMS] Swagger UI → http://localhost:${PORT}/api-docs`);
+  console.log('  GET    /metrics');
+  console.log(`  WS     ws://localhost:${PORT}/ws`);
+  console.log(`  Docs   http://localhost:${PORT}/api-docs`);
 
-  // Start the WebSocket console server alongside the HTTP API
-  createWsServer();
+  // Attach the WebSocket console server to the same HTTP server
+  createWsServer(server);
 });
 
 module.exports = app;

@@ -3,7 +3,9 @@
 /**
  * YAMS WebSocket Server — real-time console for Minecraft servers.
  *
- * Port: WS_PORT env var or 3001 by default (separate from the HTTP API on 3000).
+ * Attached to the Express HTTP server on path /ws (same port as the API).
+ * No separate port is needed; the HTTP upgrade handshake is handled by Node's
+ * built-in server, and ws routes it to this handler by path.
  *
  * ─── CLIENT → SERVER ────────────────────────────────────────────────────────
  *
@@ -46,8 +48,6 @@ const WebSocket = require('ws');
 const { subscribe, unsubscribe, sendCommand, streamEmitter, getObservability, CRASH_CLASSIFY } = require('../services/serverService');
 const observability = require('../utils/observability');
 
-const WS_PORT = process.env.WS_PORT || 3001;
-
 // Interval between server-side ping probes (ms).
 // Clients that don't respond within this window are terminated.
 const HEARTBEAT_INTERVAL_MS = 30_000;
@@ -63,12 +63,15 @@ const ERROR_CODES = {
 };
 
 /**
- * Create and start the WebSocket server.
- * Called once from app.js at startup.
+ * Attach the WebSocket server to an existing HTTP server on the /ws path.
+ * Shares the same port as the Express HTTP API — no separate WS port needed.
+ * Called once from app.js after app.listen().
+ *
+ * @param {import('http').Server} httpServer  The server returned by app.listen()
  * @returns {WebSocket.Server}
  */
-function createWsServer() {
-  const wss = new WebSocket.Server({ port: WS_PORT });
+function createWsServer(httpServer) {
+  const wss = new WebSocket.Server({ server: httpServer, path: '/ws' });
 
   // ── Event listeners for service-level events ───────────────────────────────
   // Listen to server lifecycle events and stream them to connected clients.
@@ -193,7 +196,7 @@ function createWsServer() {
     console.error('[YAMS WS] Server error:', err.message);
   });
 
-  console.log(`[YAMS] WebSocket console server running on ws://localhost:${WS_PORT}`);
+  console.log(`[YAMS] WebSocket console server attached on /ws (same port as HTTP)`);
   return wss;
 }
 

@@ -6,11 +6,17 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
+      // REST API — strip /api prefix so backend routes still work bare (e.g. /servers)
       '/api': {
-        target: 'http://localhost:3002',
+        target: process.env.VITE_API_URL || 'http://localhost:3000',
         changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/api/, '')
-      }
-    }
-  }
+        rewrite: (path) => path.replace(/^\/api/, ''),
+      },
+      // WebSocket console — proxied to the same backend port on /ws
+      '/ws': {
+        target: process.env.VITE_API_URL || 'http://localhost:3000',
+        ws: true,
+      },
+    },
+  },
 })
