@@ -1,12 +1,16 @@
 import { Outlet } from 'react-router-dom'
 import NavBar from './NavBar'
+import { C } from '../styles/tokens'
 
 export default function Layout() {
   return (
-    <div className="flex flex-col h-screen bg-gray-950 text-gray-100 overflow-hidden">
+    <div style={{
+      display: 'flex', flexDirection: 'column',
+      height: '100vh', background: C.bg, color: C.text, overflow: 'hidden',
+    }}>
       <NavBar />
-      {/* Page content fills remaining height */}
-      <div className="flex-1 overflow-hidden">
+      {/* 48px NavBar is fixed; push content below it */}
+      <div style={{ flex: 1, overflow: 'hidden', paddingTop: 48 }}>
         <Outlet />
       </div>
     </div>

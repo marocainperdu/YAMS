@@ -1,58 +1,93 @@
 import { useRef, useEffect } from 'react'
-
-const TYPE_COLOR = {
-  stdout: 'text-gray-400',
-  stderr: 'text-red-400',
-}
+import { C } from '../styles/tokens'
 
 function formatTime(ts) {
   if (!ts) return ''
-  return new Date(ts).toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })
+  return new Date(ts).toLocaleTimeString('en-US', {
+    hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit',
+  })
 }
 
 export default function ActivityFeed({ logs }) {
-  const bottomRef = useRef(null)
-  const containerRef = useRef(null)
+  const listRef = useRef(null)
+  const atBottomRef = useRef(true)
 
-  // Auto-scroll to bottom when new logs arrive, but only if already near bottom
+  const displayed = logs?.slice(-20) ?? []
+
   useEffect(() => {
-    const el = containerRef.current
+    const el = listRef.current
     if (!el) return
-    const isNearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 60
-    if (isNearBottom) bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [logs])
+    const onScroll = () => {
+      atBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40
+    }
+    el.addEventListener('scroll', onScroll)
+    return () => el.removeEventListener('scroll', onScroll)
+  }, [])
 
-  const visible = logs?.slice(-20) ?? []
+  useEffect(() => {
+    if (atBottomRef.current && listRef.current) {
+      listRef.current.scrollTop = listRef.current.scrollHeight
+    }
+  }, [logs?.length])
 
   return (
-    <div className="bg-gray-900 border border-gray-800 rounded-lg flex flex-col overflow-hidden">
-      <div className="px-4 py-2.5 border-b border-gray-800 flex items-center justify-between">
-        <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-widest">Recent Activity</h3>
-        {visible.length > 0 && (
-          <span className="text-xs text-gray-600 font-mono">{visible.length} lines</span>
-        )}
+    <div style={{
+      background: C.surface, border: `1px solid ${C.border}`,
+      borderRadius: 8, display: 'flex', flexDirection: 'column', overflow: 'hidden',
+    }}>
+      {/* Header */}
+      <div style={{
+        padding: '10px 16px', borderBottom: `1px solid ${C.border}`,
+        background: C.surface2, display: 'flex', alignItems: 'center',
+        justifyContent: 'space-between',
+      }}>
+        <span style={{
+          fontSize: 11, fontWeight: 600, color: C.muted,
+          textTransform: 'uppercase', letterSpacing: '0.06em',
+        }}>
+          Activity
+        </span>
+        <span style={{ fontSize: 10, color: C.dim }}>
+          {logs?.length ?? 0} events
+        </span>
       </div>
 
+      {/* Log list */}
       <div
-        ref={containerRef}
-        className="flex-1 overflow-y-auto min-h-0 max-h-48 p-3 space-y-0.5 scroll-smooth"
+        ref={listRef}
+        style={{ overflowY: 'auto', maxHeight: 260, padding: '8px 0' }}
       >
-        {visible.length === 0 ? (
-          <p className="text-xs text-gray-600 italic px-1 py-2">No recent activity</p>
+        {displayed.length === 0 ? (
+          <div style={{ padding: '16px', color: C.dim, fontSize: 12 }}>
+            No activity yet
+          </div>
         ) : (
-          visible.map((log, i) => (
-            <div key={i} className="flex items-start gap-2 font-mono text-xs leading-relaxed">
-              <span className="text-gray-600 shrink-0 select-none">{formatTime(log.timestamp)}</span>
+          displayed.map((log, i) => (
+            <div
+              key={log.id ?? i}
+              style={{
+                padding: '4px 16px', fontSize: 12, color: C.muted,
+                fontFamily: "'JetBrains Mono', monospace",
+                lineHeight: 1.6, display: 'flex', gap: 10,
+              }}
+            >
+              <span style={{ color: C.dim, flexShrink: 0, fontVariantNumeric: 'tabular-nums' }}>
+                {formatTime(log.timestamp || log.ts)}
+              </span>
               {log.serverName && (
-                <span className="text-blue-500/70 shrink-0 truncate max-w-[80px]">{log.serverName}</span>
+                <span style={{ color: C.blue + 'aa', flexShrink: 0, maxWidth: 100, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  [{log.serverName}]
+                </span>
               )}
-              <span className={`${TYPE_COLOR[log.type] ?? 'text-gray-400'} truncate`}>
-                {String(log.data ?? '').trim()}
+              <span style={{
+                color: log.type === 'stderr' ? C.red : C.muted,
+                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+              }}>
+                {String(log.data ?? log.msg ?? '').trim()}
               </span>
             </div>
           ))
         )}
-        <div ref={bottomRef} />
       </div>
     </div>
   )

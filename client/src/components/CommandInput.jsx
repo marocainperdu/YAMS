@@ -1,67 +1,104 @@
 import { useState, useRef, useEffect } from 'react'
+import { C } from '../styles/tokens'
 
 export default function CommandInput({ onSubmit, disabled }) {
-  const [input, setInput] = useState('')
-  const [history, setHistory] = useState([])
-  const [historyIndex, setHistoryIndex] = useState(-1)
+  const [input, setInput]       = useState('')
+  const [history, setHistory]   = useState([])
+  const [histIdx, setHistIdx]   = useState(-1)
   const inputRef = useRef(null)
 
-  const handleSubmit = (e) => {
-    e.preventDefault()
-    if (!input.trim() || disabled) return
+  useEffect(() => { inputRef.current?.focus() }, [])
 
-    onSubmit(input)
-    setHistory([...history, input])
-    setHistoryIndex(-1)
+  function handleSubmit(e) {
+    e?.preventDefault()
+    const trimmed = input.trim()
+    if (!trimmed || disabled) return
+    onSubmit(trimmed)
+    setHistory(h => [trimmed, ...h].slice(0, 100))
+    setHistIdx(-1)
     setInput('')
   }
 
-  const handleKeyDown = (e) => {
-    if (e.key === 'ArrowUp') {
+  function handleKeyDown(e) {
+    if (e.key === 'Enter')     { handleSubmit(); return }
+    if (e.key === 'ArrowUp')   {
       e.preventDefault()
-      const newIndex = historyIndex + 1
-      if (newIndex < history.length) {
-        setHistoryIndex(newIndex)
-        setInput(history[history.length - 1 - newIndex])
-      }
-    } else if (e.key === 'ArrowDown') {
+      setHistIdx(i => {
+        const n = Math.min(i + 1, history.length - 1)
+        setInput(history[n] ?? '')
+        return n
+      })
+    }
+    if (e.key === 'ArrowDown') {
       e.preventDefault()
-      const newIndex = historyIndex - 1
-      if (newIndex < 0) {
-        setHistoryIndex(-1)
-        setInput('')
-      } else {
-        setHistoryIndex(newIndex)
-        setInput(history[history.length - 1 - newIndex])
-      }
+      setHistIdx(i => {
+        const n = Math.max(i - 1, -1)
+        setInput(n === -1 ? '' : history[n])
+        return n
+      })
     }
   }
 
-  useEffect(() => {
-    inputRef.current?.focus()
-  }, [])
+  const hasInput = input.trim().length > 0
 
   return (
-    <form onSubmit={handleSubmit} className="bg-gray-900 border-t border-gray-800 p-3">
-      <div className="flex gap-2">
-        <input
-          ref={inputRef}
-          type="text"
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={handleKeyDown}
-          placeholder="Enter command..."
-          disabled={disabled}
-          className="flex-1 bg-gray-950 border border-gray-700 rounded px-3 py-2 text-sm font-mono text-green-400 placeholder-gray-600 focus:outline-none focus:border-green-600 focus:ring-1 focus:ring-green-600/20 disabled:opacity-40 transition-colors duration-150"
-        />
-        <button
-          type="submit"
-          disabled={disabled || !input.trim()}
-          className="px-4 py-2 bg-green-700 text-white rounded text-sm font-medium hover:bg-green-600 disabled:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-150"
-        >
-          Send
-        </button>
-      </div>
-    </form>
+    <div style={{
+      flexShrink: 0,
+      borderTop: `1px solid ${C.border}`,
+      background: C.surface,
+      display: 'flex', alignItems: 'center',
+      opacity: disabled ? 0.5 : 1,
+      transition: 'opacity 150ms',
+    }}>
+      {/* Prompt */}
+      <span style={{
+        padding: '0 12px 0 16px',
+        color: C.green,
+        fontFamily: "'JetBrains Mono', monospace",
+        fontSize: 13, fontWeight: 600,
+        userSelect: 'none', flexShrink: 0,
+      }}>
+        &gt;
+      </span>
+
+      {/* Input */}
+      <input
+        ref={inputRef}
+        type="text"
+        value={input}
+        onChange={e => setInput(e.target.value)}
+        onKeyDown={handleKeyDown}
+        placeholder="Enter command…"
+        disabled={disabled}
+        autoComplete="off"
+        spellCheck={false}
+        style={{
+          flex: 1, background: 'none', border: 'none', outline: 'none',
+          color: C.text,
+          fontFamily: "'JetBrains Mono', monospace",
+          fontSize: 13, padding: '12px 0',
+          caretColor: C.green,
+        }}
+      />
+
+      {/* Send button */}
+      <button
+        onClick={handleSubmit}
+        disabled={disabled || !hasInput}
+        style={{
+          background: 'none',
+          border: 'none',
+          borderLeft: `1px solid ${C.border}`,
+          color: hasInput && !disabled ? C.blue : C.dim,
+          padding: '0 16px', height: '100%',
+          cursor: hasInput && !disabled ? 'pointer' : 'default',
+          fontSize: 12, fontWeight: 600,
+          transition: 'color 150ms', flexShrink: 0,
+          minHeight: 45,
+        }}
+      >
+        Send
+      </button>
+    </div>
   )
 }

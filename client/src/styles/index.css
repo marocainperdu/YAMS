@@ -1,89 +1,68 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-* {
-  box-sizing: border-box;
-}
+/* ── Base ─────────────────────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; }
 
-html,
-body,
-#root {
+html, body, #root {
   width: 100%;
   height: 100%;
   margin: 0;
   padding: 0;
   overflow: hidden;
+  background: #0d1117;
+  color: #e6edf3;
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
-/* Custom colors for Tailwind */
-.bg-gray-750 {
-  background-color: #2d2d2d;
-}
+/* ── Scrollbars ───────────────────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #30363d; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #484f58; }
 
-/* Terminal scrollbar styling */
-.xterm {
-  padding: 10px !important;
-}
+/* ── Focus ────────────────────────────────────────────────────────────────── */
+:focus { outline: 2px solid transparent; outline-offset: 2px; }
+:focus-visible { outline: 2px solid #388bfd; outline-offset: 2px; }
 
-.xterm-viewport {
-  background-color: #1a1a1a !important;
-  border-radius: 4px;
-}
+/* ── xterm overrides ──────────────────────────────────────────────────────── */
+.xterm { height: 100%; }
+.xterm-viewport { overflow-y: auto !important; background-color: #0d1117 !important; }
+.xterm-screen { padding: 8px 12px; }
+.xterm canvas { outline: none; }
 
-/* Smooth scrolling */
-.xterm-screen {
-  scroll-behavior: smooth;
-}
+/* ── Input placeholder ────────────────────────────────────────────────────── */
+input::placeholder { color: #484f58; }
 
-/* Animations */
+/* ── Animations ───────────────────────────────────────────────────────────── */
+@keyframes value-bump {
+  0%   { transform: scale(1); }
+  40%  { transform: scale(1.04); }
+  100% { transform: scale(1); }
+}
+.animate-value-bump { animation: value-bump 300ms cubic-bezier(0.22, 1, 0.36, 1); }
+
+@keyframes fade-in-up {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.animate-fade-in-up { animation: fade-in-up 0.3s ease-out forwards; }
+
 @keyframes slide-in {
   from { opacity: 0; transform: translateX(100px); }
   to   { opacity: 1; transform: translateX(0); }
 }
 .animate-slide-in { animation: slide-in 0.3s ease-in-out; }
 
-/* MetricCard value flash — re-triggers when React remounts via key prop.
-   Kept subtle: small scale bump, no harsh opacity drop. */
-@keyframes value-flash {
-  0%   { opacity: 1;    transform: scale(1); }
-  30%  { opacity: 0.85; transform: scale(1.04); }
-  100% { opacity: 1;    transform: scale(1); }
+/* ── Running dot glow pulse ───────────────────────────────────────────────── */
+@keyframes status-pulse {
+  0%, 100% { box-shadow: 0 0 4px #3fb950aa; }
+  50%       { box-shadow: 0 0 8px #3fb950cc; }
 }
-.animate-value-flash { animation: value-flash 0.4s cubic-bezier(0.22, 1, 0.36, 1); }
-
-/* Dashboard card stagger on mount */
-@keyframes fade-in-up {
-  from { opacity: 0; transform: translateY(10px); }
-  to   { opacity: 1; transform: translateY(0); }
-}
-.animate-fade-in-up { animation: fade-in-up 0.35s ease-out forwards; }
-
-/* Focus management */
-:focus {
-  outline: 2px solid transparent;
-  outline-offset: 2px;
-}
-
-:focus-visible {
-  outline: 2px solid #3b82f6;
-  outline-offset: 2px;
-}
-
-/* Scrollbar styling */
-::-webkit-scrollbar {
-  width: 8px;
-}
-
-::-webkit-scrollbar-track {
-  background: #1a1a1a;
-}
-
-::-webkit-scrollbar-thumb {
-  background: #444444;
-  border-radius: 4px;
-}
-
-::-webkit-scrollbar-thumb:hover {
-  background: #666666;
-}
+.dot-running { animation: status-pulse 2s ease-in-out infinite; }

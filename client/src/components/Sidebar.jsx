@@ -1,39 +1,42 @@
 import { memo } from 'react'
-
-const STATUS_COLORS = {
-  running: 'text-green-500 bg-green-500/10',
-  stopped: 'text-gray-500 bg-gray-500/10',
-  crashed: 'text-red-500 bg-red-500/10'
-}
-
-const STATUS_ICON = {
-  running: '●',
-  stopped: '○',
-  crashed: '✕'
-}
+import { C, statusColor } from '../styles/tokens'
 
 function Sidebar({ servers, selectedServerId, onSelectServer, loading }) {
-  if (loading) {
-    return (
-      <div className="w-64 bg-gray-950 border-r border-gray-800 p-4">
-        <div className="text-sm text-gray-500">Loading servers...</div>
-      </div>
-    )
-  }
-
   return (
-    <aside className="w-64 bg-gray-950 border-r border-gray-800 flex flex-col">
-      <div className="px-4 py-3 border-b border-gray-800">
-        <h2 className="text-sm font-semibold text-gray-300">Servers</h2>
+    <aside style={{
+      width: 220, flexShrink: 0,
+      background: C.bg,
+      borderRight: `1px solid ${C.border}`,
+      display: 'flex', flexDirection: 'column',
+    }}>
+      <div style={{
+        padding: '12px 16px', borderBottom: `1px solid ${C.border}`,
+        background: C.surface2,
+      }}>
+        <span style={{
+          fontSize: 11, fontWeight: 600, color: C.muted,
+          textTransform: 'uppercase', letterSpacing: '0.06em',
+        }}>
+          Servers
+        </span>
       </div>
 
-      <div className="flex-1 overflow-y-auto">
-        {servers.length === 0 ? (
-          <div className="px-4 py-6 text-sm text-gray-500 text-center">
-            No servers created yet
+      <div style={{ flex: 1, overflowY: 'auto', padding: '8px 0' }}>
+        {loading ? (
+          <div style={{ padding: '12px 16px' }}>
+            {[1, 2, 3].map(i => (
+              <div key={i} className="animate-pulse" style={{
+                height: 36, background: C.surface, borderRadius: 6,
+                marginBottom: 4,
+              }} />
+            ))}
+          </div>
+        ) : servers.length === 0 ? (
+          <div style={{ padding: '24px 16px', textAlign: 'center', color: C.dim, fontSize: 12 }}>
+            No servers yet
           </div>
         ) : (
-          <nav className="space-y-1 p-2">
+          <div style={{ padding: '4px 8px' }}>
             {servers.map(server => (
               <ServerItem
                 key={server.id}
@@ -42,7 +45,7 @@ function Sidebar({ servers, selectedServerId, onSelectServer, loading }) {
                 onSelect={() => onSelectServer(server.id)}
               />
             ))}
-          </nav>
+          </div>
         )}
       </div>
     </aside>
@@ -51,24 +54,43 @@ function Sidebar({ servers, selectedServerId, onSelectServer, loading }) {
 
 const ServerItem = memo(function ServerItem({ server, isSelected, onSelect }) {
   const status = server.status || 'stopped'
-  const statusColor = STATUS_COLORS[status] || STATUS_COLORS.stopped
+  const dotColor = statusColor(status)
 
   return (
     <button
       onClick={onSelect}
-      className={`w-full text-left px-3 py-2 rounded transition-colors ${
-        isSelected
-          ? 'bg-blue-600 text-white'
-          : 'hover:bg-gray-800 text-gray-300'
-      }`}
+      style={{
+        width: '100%', textAlign: 'left',
+        padding: '8px 10px', borderRadius: 6,
+        border: 'none', cursor: 'pointer',
+        background: isSelected ? C.surface2 : 'transparent',
+        outline: isSelected ? `1px solid ${C.border}` : '1px solid transparent',
+        transition: 'background 150ms, outline 150ms',
+        display: 'flex', flexDirection: 'column', gap: 2,
+      }}
+      onMouseEnter={e => { if (!isSelected) e.currentTarget.style.background = C.surface }}
+      onMouseLeave={e => { if (!isSelected) e.currentTarget.style.background = 'transparent' }}
     >
-      <div className="flex items-center gap-2">
-        <span className={`text-xs ${statusColor} px-2 py-1 rounded`}>
-          {STATUS_ICON[status]} {status}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <span
+          className={status === 'running' ? 'dot-running' : ''}
+          style={{
+            width: 7, height: 7, borderRadius: '50%',
+            background: dotColor, flexShrink: 0,
+          }}
+        />
+        <span style={{
+          fontSize: 13, fontWeight: 500,
+          color: isSelected ? C.text : C.muted,
+          whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+          transition: 'color 150ms',
+        }}>
+          {server.name}
         </span>
       </div>
-      <div className="mt-1 text-sm font-medium truncate">{server.name}</div>
-      <div className="text-xs text-gray-500">Port: {server.port}</div>
+      <span style={{ fontSize: 11, color: C.dim, paddingLeft: 13 }}>
+        :{server.port}
+      </span>
     </button>
   )
 })

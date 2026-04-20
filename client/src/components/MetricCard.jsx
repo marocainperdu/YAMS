@@ -1,70 +1,74 @@
-// Left-border accent card. Uses `key={value}` on the number span to retrigger
-// the CSS flash animation automatically on every value change — no state needed.
+import { useState, useEffect, useRef } from 'react'
+import { C } from '../styles/tokens'
 
-const COLORS = {
-  default: {
-    border:  'border-l-gray-600',
-    value:   'text-gray-100',
-    bg:      'hover:border-gray-700',
-  },
-  green: {
-    border:  'border-l-emerald-500',
-    value:   'text-emerald-400',
-    bg:      'hover:border-emerald-500/50',
-  },
-  blue: {
-    border:  'border-l-blue-500',
-    value:   'text-blue-400',
-    bg:      'hover:border-blue-500/50',
-  },
-  amber: {
-    border:  'border-l-amber-500',
-    value:   'text-amber-400',
-    bg:      'hover:border-amber-500/50',
-  },
-  red: {
-    border:  'border-l-red-500',
-    value:   'text-red-400',
-    bg:      'hover:border-red-500/50',
-  },
-}
+export default function MetricCard({ label, value, accent, sub, style, className }) {
+  const [bump, setBump] = useState(false)
+  const prev = useRef(value)
 
-export default function MetricCard({ icon, label, value, color = 'default', style }) {
-  const c = COLORS[color] ?? COLORS.default
+  useEffect(() => {
+    if (prev.current !== value) {
+      prev.current = value
+      setBump(true)
+      const t = setTimeout(() => setBump(false), 300)
+      return () => clearTimeout(t)
+    }
+  }, [value])
 
   return (
     <div
-      style={style}
-      className={`
-        animate-fade-in-up
-        bg-gray-900 border border-gray-800 border-l-2 ${c.border} ${c.bg}
-        rounded-lg p-4 flex flex-col gap-2
-        transition-transform duration-200 hover:-translate-y-px
-      `}
+      className={className}
+      style={{
+        background: C.surface,
+        border: `1px solid ${C.border}`,
+        borderRadius: 8,
+        padding: '16px 20px',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 4,
+        minWidth: 0,
+        flex: 1,
+        ...style,
+      }}
     >
-      <span className="text-base leading-none">{icon}</span>
-
-      {/* key=value remounts the element on every change, retriggering the CSS animation */}
-      <span
-        key={value}
-        className={`animate-value-flash font-mono text-2xl font-bold leading-none ${c.value}`}
-      >
-        {value}
+      <span style={{
+        fontSize: 11, fontWeight: 500, color: C.muted,
+        textTransform: 'uppercase', letterSpacing: '0.06em',
+      }}>
+        {label}
       </span>
 
-      <span className="text-xs text-gray-500 uppercase tracking-widest">{label}</span>
+      <span
+        className={bump ? 'animate-value-bump' : ''}
+        style={{
+          fontSize: 28, fontWeight: 700,
+          color: accent || C.text,
+          lineHeight: 1,
+          display: 'inline-block',
+          fontVariantNumeric: 'tabular-nums',
+          transition: 'color 150ms',
+        }}
+      >
+        {value ?? '—'}
+      </span>
+
+      {sub != null && (
+        <span style={{ fontSize: 11, color: C.dim, marginTop: 2 }}>
+          {sub}
+        </span>
+      )}
     </div>
   )
 }
 
-// Skeleton shown during initial load
 export function MetricCardSkeleton() {
-  // Mirrors live card structure exactly (same gap-2, same element heights) — no layout shift
   return (
-    <div className="bg-gray-900 border border-gray-800 border-l-2 border-l-gray-800 rounded-lg p-4 flex flex-col gap-2">
-      <div className="w-4 h-4 bg-gray-800 rounded animate-pulse" />
-      <div className="w-10 h-7 bg-gray-800 rounded animate-pulse" />
-      <div className="w-20 h-3 bg-gray-800 rounded animate-pulse" />
+    <div style={{
+      background: C.surface, border: `1px solid ${C.border}`,
+      borderRadius: 8, padding: '16px 20px',
+      display: 'flex', flexDirection: 'column', gap: 4, flex: 1,
+    }}>
+      <div className="animate-pulse" style={{ height: 11, width: 80, background: C.surface2, borderRadius: 3 }} />
+      <div className="animate-pulse" style={{ height: 28, width: 48, background: C.surface2, borderRadius: 4, marginTop: 4 }} />
     </div>
   )
 }

@@ -1,32 +1,63 @@
+import { useNavigate } from 'react-router-dom'
+import { C, statusColor } from '../styles/tokens'
+
 export default function StatusBar({ server, status, wsConnected }) {
-  const statusColor = {
-    running: 'bg-green-600',
-    stopped: 'bg-gray-600',
-    crashed: 'bg-red-600',
-    pending: 'bg-yellow-600'
-  }[status] || 'bg-gray-600'
+  const navigate = useNavigate()
+  const wsColor = wsConnected ? C.green : status === 'lost' ? C.red : C.amber
+  const wsLabel = wsConnected ? 'Connected' : 'Reconnecting…'
 
   return (
-    <header className="bg-gray-950 border-b border-gray-800 px-6 py-4">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <h1 className="text-xl font-bold text-white">
-            {server ? server.name : 'YAMS Console'}
-          </h1>
-          {server && (
-            <>
-              <div className={`w-2 h-2 rounded-full ${statusColor} animate-pulse`} />
-              <span className="text-sm text-gray-400">{status}</span>
-            </>
-          )}
-        </div>
-        <div className="flex items-center gap-2">
-          <div className={`w-2 h-2 rounded-full ${wsConnected ? 'bg-green-600' : 'bg-red-600'}`} />
-          <span className="text-xs text-gray-400">
-            {wsConnected ? 'Connected' : 'Offline'}
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: 12,
+      padding: '0 24px', height: 48, flexShrink: 0,
+      borderBottom: `1px solid ${C.border}`,
+      background: C.surface,
+    }}>
+      {/* Back button */}
+      <button
+        onClick={() => navigate('/')}
+        style={{
+          background: 'none', border: 'none', color: C.muted, cursor: 'pointer',
+          fontSize: 13, padding: '4px 0', display: 'flex', alignItems: 'center', gap: 6,
+          transition: 'color 150ms',
+        }}
+        onMouseEnter={e => { e.currentTarget.style.color = C.text }}
+        onMouseLeave={e => { e.currentTarget.style.color = C.muted }}
+      >
+        ← Dashboard
+      </button>
+
+      <div style={{ width: 1, height: 16, background: C.border }} />
+
+      <span style={{ fontSize: 14, fontWeight: 600, color: C.text }}>
+        {server?.name ?? 'Console'}
+      </span>
+
+      {server && (
+        <>
+          <span style={{
+            fontSize: 11, color: statusColor(status), fontWeight: 500,
+            textTransform: 'capitalize',
+          }}>
+            {status}
           </span>
-        </div>
+        </>
+      )}
+
+      <div style={{ flex: 1 }} />
+
+      {/* WS status pill */}
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 6,
+        fontSize: 11, color: wsColor, fontWeight: 500,
+      }}>
+        <span style={{
+          width: 7, height: 7, borderRadius: '50%', background: wsColor,
+          boxShadow: wsConnected ? `0 0 6px ${C.green}88` : 'none',
+          display: 'inline-block',
+        }} />
+        {wsLabel}
       </div>
-    </header>
+    </div>
   )
 }
