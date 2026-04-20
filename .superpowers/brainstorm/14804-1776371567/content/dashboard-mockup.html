@@ -1,0 +1,157 @@
+<h2>Dashboard Visual Design</h2>
+<p class="subtitle">Dark admin panel — does this feel right? Click to approve or tell me what to change.</p>
+
+<div class="mockup">
+  <div class="mockup-header">YAMS Dashboard — http://localhost:5173/</div>
+  <div class="mockup-body" style="padding:0;overflow:hidden;">
+
+    <!-- Top nav bar -->
+    <div style="background:#0a0a0f;border-bottom:1px solid #1f2937;padding:10px 20px;display:flex;align-items:center;justify-content:space-between;">
+      <div style="display:flex;align-items:center;gap:12px;">
+        <span style="font-size:13px;font-weight:700;color:#f1f5f9;letter-spacing:0.05em;">⬡ YAMS</span>
+        <span style="font-size:10px;color:#4b5563;border-left:1px solid #374151;padding-left:12px;">Minecraft Server Manager</span>
+      </div>
+      <div style="display:flex;gap:4px;">
+        <span style="font-size:11px;padding:3px 10px;background:#1e3a5f;color:#60a5fa;border-radius:4px;font-weight:600;">Dashboard</span>
+        <span style="font-size:11px;padding:3px 10px;background:#111827;color:#6b7280;border-radius:4px;">Console</span>
+      </div>
+    </div>
+
+    <div style="padding:20px;background:#0d0d12;">
+
+      <!-- Metric cards row -->
+      <div style="font-size:10px;color:#6b7280;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:10px;">System Overview</div>
+      <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:20px;">
+
+        <div style="background:#111827;border:1px solid #1f2937;border-radius:8px;padding:14px;">
+          <div style="font-size:18px;margin-bottom:2px;">🖥️</div>
+          <div style="font-size:22px;font-weight:700;color:#f1f5f9;line-height:1;">3</div>
+          <div style="font-size:10px;color:#6b7280;margin-top:3px;">Total Servers</div>
+        </div>
+
+        <div style="background:#111827;border:1px solid #1f2937;border-radius:8px;padding:14px;border-left:3px solid #22c55e;">
+          <div style="font-size:18px;margin-bottom:2px;">🟢</div>
+          <div style="font-size:22px;font-weight:700;color:#22c55e;line-height:1;">2</div>
+          <div style="font-size:10px;color:#6b7280;margin-top:3px;">Running</div>
+        </div>
+
+        <div style="background:#111827;border:1px solid #1f2937;border-radius:8px;padding:14px;border-left:3px solid #3b82f6;">
+          <div style="font-size:18px;margin-bottom:2px;">👥</div>
+          <div style="font-size:22px;font-weight:700;color:#3b82f6;line-height:1;">12</div>
+          <div style="font-size:10px;color:#6b7280;margin-top:3px;">Active Clients</div>
+        </div>
+
+        <div style="background:#111827;border:1px solid #1f2937;border-radius:8px;padding:14px;border-left:3px solid #f59e0b;">
+          <div style="font-size:18px;margin-bottom:2px;">⏳</div>
+          <div style="font-size:22px;font-weight:700;color:#f59e0b;line-height:1;">2</div>
+          <div style="font-size:10px;color:#6b7280;margin-top:3px;">Pending</div>
+        </div>
+
+        <div style="background:#111827;border:1px solid #1f2937;border-radius:8px;padding:14px;border-left:3px solid #ef4444;">
+          <div style="font-size:18px;margin-bottom:2px;">⚠️</div>
+          <div style="font-size:22px;font-weight:700;color:#ef4444;line-height:1;">84</div>
+          <div style="font-size:10px;color:#6b7280;margin-top:3px;">Dropped Msgs</div>
+        </div>
+      </div>
+
+      <!-- Server table + Uptime panel side by side -->
+      <div style="display:grid;grid-template-columns:2fr 1fr;gap:10px;margin-bottom:20px;">
+
+        <!-- Server table -->
+        <div style="background:#111827;border:1px solid #1f2937;border-radius:8px;overflow:hidden;">
+          <div style="padding:12px 16px;border-bottom:1px solid #1f2937;display:flex;justify-content:space-between;align-items:center;">
+            <span style="font-size:11px;font-weight:600;color:#e2e8f0;">Servers</span>
+            <span style="font-size:10px;color:#4b5563;">3 total</span>
+          </div>
+          <table style="width:100%;border-collapse:collapse;font-size:11px;">
+            <thead>
+              <tr style="background:#0d1117;">
+                <th style="text-align:left;padding:8px 16px;color:#6b7280;font-weight:500;">Name</th>
+                <th style="text-align:left;padding:8px;color:#6b7280;font-weight:500;">Status</th>
+                <th style="text-align:left;padding:8px;color:#6b7280;font-weight:500;">Clients</th>
+                <th style="text-align:left;padding:8px;color:#6b7280;font-weight:500;">Uptime</th>
+                <th style="padding:8px;"></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr style="border-top:1px solid #1f2937;">
+                <td style="padding:10px 16px;color:#f1f5f9;font-weight:500;">survival-smp</td>
+                <td style="padding:10px 8px;"><span style="font-size:10px;padding:2px 8px;background:#14532d;color:#4ade80;border-radius:12px;">● running</span></td>
+                <td style="padding:10px 8px;color:#9ca3af;">5</td>
+                <td style="padding:10px 8px;color:#9ca3af;">15h 4m</td>
+                <td style="padding:10px 8px;"><span style="font-size:10px;padding:2px 8px;background:#1e3a5f;color:#60a5fa;border-radius:4px;cursor:pointer;">Open →</span></td>
+              </tr>
+              <tr style="border-top:1px solid #1f2937;">
+                <td style="padding:10px 16px;color:#f1f5f9;font-weight:500;">creative-build</td>
+                <td style="padding:10px 8px;"><span style="font-size:10px;padding:2px 8px;background:#14532d;color:#4ade80;border-radius:12px;">● running</span></td>
+                <td style="padding:10px 8px;color:#9ca3af;">7</td>
+                <td style="padding:10px 8px;color:#9ca3af;">2h 18m</td>
+                <td style="padding:10px 8px;"><span style="font-size:10px;padding:2px 8px;background:#1e3a5f;color:#60a5fa;border-radius:4px;cursor:pointer;">Open →</span></td>
+              </tr>
+              <tr style="border-top:1px solid #1f2937;">
+                <td style="padding:10px 16px;color:#f1f5f9;font-weight:500;">minigames</td>
+                <td style="padding:10px 8px;"><span style="font-size:10px;padding:2px 8px;background:#1f2937;color:#9ca3af;border-radius:12px;">○ stopped</span></td>
+                <td style="padding:10px 8px;color:#9ca3af;">0</td>
+                <td style="padding:10px 8px;color:#4b5563;">—</td>
+                <td style="padding:10px 8px;"><span style="font-size:10px;padding:2px 8px;background:#1e3a5f;color:#60a5fa;border-radius:4px;cursor:pointer;">Open →</span></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- System stats panel -->
+        <div style="background:#111827;border:1px solid #1f2937;border-radius:8px;padding:16px;">
+          <div style="font-size:11px;font-weight:600;color:#e2e8f0;margin-bottom:14px;">System</div>
+          <div style="display:flex;flex-direction:column;gap:12px;">
+            <div>
+              <div style="font-size:10px;color:#6b7280;margin-bottom:3px;">Uptime</div>
+              <div style="font-size:14px;font-weight:600;color:#f1f5f9;">34h 17m</div>
+            </div>
+            <div style="border-top:1px solid #1f2937;padding-top:12px;">
+              <div style="font-size:10px;color:#6b7280;margin-bottom:6px;">Server Health</div>
+              <div style="display:flex;gap:4px;align-items:center;">
+                <div style="flex:2;height:6px;background:#22c55e;border-radius:3px;"></div>
+                <div style="flex:1;height:6px;background:#4b5563;border-radius:3px;"></div>
+                <div style="font-size:9px;color:#9ca3af;margin-left:4px;">2/3 up</div>
+              </div>
+            </div>
+            <div style="border-top:1px solid #1f2937;padding-top:12px;">
+              <div style="font-size:10px;color:#6b7280;margin-bottom:3px;">Last Refreshed</div>
+              <div style="font-size:11px;color:#9ca3af;">just now</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Activity feed -->
+      <div style="background:#111827;border:1px solid #1f2937;border-radius:8px;overflow:hidden;">
+        <div style="padding:12px 16px;border-bottom:1px solid #1f2937;">
+          <span style="font-size:11px;font-weight:600;color:#e2e8f0;">Recent Activity</span>
+        </div>
+        <div style="padding:10px 16px;font-family:monospace;font-size:10px;color:#6b7280;line-height:2;">
+          <div><span style="color:#4b5563;">14:32:01</span> &nbsp;<span style="color:#22c55e;">survival-smp</span> &nbsp;Player Steve joined the game</div>
+          <div><span style="color:#4b5563;">14:31:47</span> &nbsp;<span style="color:#22c55e;">creative-build</span> &nbsp;Server started</div>
+          <div><span style="color:#4b5563;">14:28:03</span> &nbsp;<span style="color:#9ca3af;">minigames</span> &nbsp;Server stopped (exit 0)</div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<div class="options" style="margin-top:20px;">
+  <div class="option" data-choice="approve" onclick="toggleSelect(this)">
+    <div class="letter">✓</div>
+    <div class="content">
+      <h3>Looks good — build it</h3>
+      <p>Proceed with this design direction</p>
+    </div>
+  </div>
+  <div class="option" data-choice="tweak" onclick="toggleSelect(this)">
+    <div class="letter">~</div>
+    <div class="content">
+      <h3>Close, but I want changes</h3>
+      <p>Tell me in the terminal what to adjust</p>
+    </div>
+  </div>
+</div>

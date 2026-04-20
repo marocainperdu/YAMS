@@ -38,19 +38,26 @@ body,
 
 /* Animations */
 @keyframes slide-in {
-  from {
-    opacity: 0;
-    transform: translateX(100px);
-  }
-  to {
-    opacity: 1;
-    transform: translateX(0);
-  }
+  from { opacity: 0; transform: translateX(100px); }
+  to   { opacity: 1; transform: translateX(0); }
 }
+.animate-slide-in { animation: slide-in 0.3s ease-in-out; }
 
-.animate-slide-in {
-  animation: slide-in 0.3s ease-in-out;
+/* MetricCard value flash — re-triggers when React remounts via key prop.
+   Kept subtle: small scale bump, no harsh opacity drop. */
+@keyframes value-flash {
+  0%   { opacity: 1;    transform: scale(1); }
+  30%  { opacity: 0.85; transform: scale(1.04); }
+  100% { opacity: 1;    transform: scale(1); }
 }
+.animate-value-flash { animation: value-flash 0.4s cubic-bezier(0.22, 1, 0.36, 1); }
+
+/* Dashboard card stagger on mount */
+@keyframes fade-in-up {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.animate-fade-in-up { animation: fade-in-up 0.35s ease-out forwards; }
 
 /* Focus management */
 :focus {

@@ -15,6 +15,7 @@ const { getDb } = require('./src/db');
 require('./src/services/serverService');
 
 const serverRoutes = require('./src/routes/serverRoutes');
+const metricsRoutes = require('./src/routes/metricsRoutes');
 const swaggerSpec = require('./src/swagger');
 const { createWsServer } = require('./src/websocket/wsServer');
 
@@ -38,6 +39,7 @@ app.use((req, _res, next) => {
 // ---------------------------------------------------------------------------
 
 app.use('/servers', serverRoutes);
+app.use('/metrics', metricsRoutes);
 app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 
 // ---------------------------------------------------------------------------
@@ -83,6 +85,7 @@ app.listen(PORT, () => {
   console.log('  GET    /servers/:id');
   console.log('  POST   /servers/:id/start');
   console.log('  POST   /servers/:id/stop');
+  console.log(`  GET    /metrics`);
   console.log(`[YAMS] Swagger UI → http://localhost:${PORT}/api-docs`);
 
   // Start the WebSocket console server alongside the HTTP API

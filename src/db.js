@@ -1,12 +1,7 @@
 'use strict';
 
-/**
- * SQLite singleton using Node.js built-in `node:sqlite` (stable since Node 24).
- * No native compilation required — no external dependencies.
- */
-
 const path = require('path');
-const { DatabaseSync } = require('node:sqlite');
+const Database = require('better-sqlite3');
 
 // Database file — overridable via YAMS_DB env var (used by tests)
 const DB_PATH = process.env.YAMS_DB || path.join(__dirname, '..', 'yams.db');
@@ -19,7 +14,7 @@ let _db = null;
  */
 function getDb() {
   if (!_db) {
-    _db = new DatabaseSync(DB_PATH);
+    _db = new Database(DB_PATH);
 
     // WAL mode gives better read concurrency and is safer on power loss
     _db.exec("PRAGMA journal_mode = WAL");

@@ -49,11 +49,16 @@ const CRASH_CLASSIFY = {
 
 /**
  * Map<serverId, { child: ChildProcess, name: string, clients: Set<WebSocket>,
- *                 logs: [], stopping: boolean }>
+ *                 logs: [], stopping: boolean, startedAt: number }>
  * Only populated for servers whose process is currently alive.
  * `stopping` flag is set when we initiate a stop (to distinguish from crashes).
+ * `startedAt` is epoch ms used to compute per-server uptime in /metrics.
  */
 const processes = new Map();
+
+// Global count of log messages dropped due to client backpressure.
+// Incremented in broadcastToClients(); read by getMetricsSnapshot().
+let droppedMessages = 0;
 
 // WebSocket.OPEN value per the WS spec (avoids importing `ws` here just for the constant)
 const WS_OPEN = 1;
@@ -73,11 +78,11 @@ function broadcastToClients(id, msg) {
     if (ws.readyState === WS_OPEN && ws.bufferedAmount < BACKPRESSURE_BUFFER_LIMIT) {
       ws.send(json);
     } else if (ws.readyState === WS_OPEN && !ws.metadata) {
-      // Initialize metadata on first backpressure event
       ws.metadata = { droppedMessages: 1 };
+      droppedMessages++;
     } else if (ws.readyState === WS_OPEN && ws.metadata) {
-      // Track dropped messages for slow client
       ws.metadata.droppedMessages = (ws.metadata.droppedMessages || 0) + 1;
+      droppedMessages++;
     }
   }
 }
@@ -279,7 +284,7 @@ function startServer(id) {
   // `clients` starts empty and is populated via subscribe().
   // `logs` is the ring buffer replayed to late-joining clients.
   // `stopping` tracks whether we initiated the stop (vs a crash).
-  processes.set(id, { child, name: server.name, clients: new Set(), logs: [], stopping: false });
+  processes.set(id, { child, name: server.name, clients: new Set(), logs: [], stopping: false, startedAt: Date.now() });
 
   // Update DB to reflect running state
   try {
@@ -565,6 +570,42 @@ function sendCommand(serverId, command) {
   child.stdin.write(`${command}\n`);
 }
 
+/**
+ * Returns a safe, serialisable snapshot of current runtime state for /metrics.
+ * Never exposes raw WebSocket objects or ChildProcess references.
+ *
+ * Computes client counts and per-server uptime directly from the live Maps so
+ * the response is always accurate — observability.js updateState() is not wired
+ * for client tracking, so we bypass it for those fields.
+ */
+function getMetricsSnapshot() {
+  const allServers = serverModel.findAll();
+  const now = Date.now();
+
+  const serverList = allServers.map(s => {
+    const entry = processes.get(s.id);
+    const pendingSet = pendingClients.get(s.id);
+    return {
+      id: s.id,
+      name: s.name,
+      status: s.status,
+      port: s.port,
+      clients: entry ? entry.clients.size : 0,
+      pendingClients: pendingSet ? pendingSet.size : 0,
+      uptime: entry ? now - entry.startedAt : 0,
+      // Last 5 log lines for the activity feed (already buffered in memory)
+      recentLogs: entry ? entry.logs.slice(-5) : [],
+    };
+  });
+
+  let totalActiveClients = 0;
+  let totalPendingClients = 0;
+  for (const [, entry] of processes) totalActiveClients += entry.clients.size;
+  for (const [, set] of pendingClients) totalPendingClients += set.size;
+
+  return { serverList, totalActiveClients, totalPendingClients, droppedMessages };
+}
+
 /** @returns {object[]} All servers from DB */
 function listServers() {
   return serverModel.findAll();
@@ -585,6 +626,7 @@ module.exports = {
   subscribe, unsubscribe, sendCommand,
   streamEmitter,
   getObservability: observability.getObservability,
+  getMetricsSnapshot,
   LOG_BUFFER_SIZE,
   PENDING_CLIENT_TIMEOUT_MS,
   BACKPRESSURE_BUFFER_LIMIT,

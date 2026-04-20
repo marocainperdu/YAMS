@@ -1,0 +1,81 @@
+<h2>How should the Dashboard integrate into YAMS?</h2>
+<p class="subtitle">The current app has no router — it's a single-page sidebar + console layout. Pick the integration approach.</p>
+
+<div class="options">
+  <div class="option" data-choice="a" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>Add a Router — Dashboard as a separate page</h3>
+      <p>Install <code>react-router-dom</code>. Dashboard lives at <code>/</code>, Console at <code>/console/:id</code>. Clean separation, back-button works, bookmarkable.</p>
+      <div class="mockup" style="margin-top:12px;">
+        <div class="mockup-header">App layout with router</div>
+        <div class="mockup-body" style="padding:12px;font-size:12px;">
+          <div class="mock-nav" style="margin-bottom:8px;">YAMS &nbsp;|&nbsp; <strong>Dashboard</strong> &nbsp;|&nbsp; Console</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:8px;">
+            <div class="placeholder" style="height:60px;text-align:center;padding-top:18px;">Metric Card</div>
+            <div class="placeholder" style="height:60px;text-align:center;padding-top:18px;">Metric Card</div>
+            <div class="placeholder" style="height:60px;text-align:center;padding-top:18px;">Metric Card</div>
+          </div>
+          <div class="placeholder" style="height:80px;text-align:center;padding-top:28px;">Server Table</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="b" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>Tab switcher — Dashboard tab in existing layout</h3>
+      <p>No router. Add a top tab bar (Dashboard / Console). Click toggles the main panel. Zero new dependencies.</p>
+      <div class="mockup" style="margin-top:12px;">
+        <div class="mockup-header">Tab layout (no router)</div>
+        <div class="mockup-body" style="padding:12px;font-size:12px;">
+          <div style="display:flex;gap:0;margin-bottom:8px;border-bottom:1px solid #333;">
+            <div style="padding:4px 16px;background:#3b82f6;color:white;font-size:11px;">Dashboard</div>
+            <div style="padding:4px 16px;background:#1f2937;color:#9ca3af;font-size:11px;">Console</div>
+          </div>
+          <div style="display:flex;gap:8px;">
+            <div class="mock-sidebar" style="width:100px;font-size:11px;">Servers list</div>
+            <div style="flex:1;">
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:6px;">
+                <div class="placeholder" style="height:50px;text-align:center;padding-top:14px;">Card</div>
+                <div class="placeholder" style="height:50px;text-align:center;padding-top:14px;">Card</div>
+              </div>
+              <div class="placeholder" style="height:60px;text-align:center;padding-top:20px;">Table</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="c" onclick="toggleSelect(this)">
+    <div class="letter">C</div>
+    <div class="content">
+      <h3>Replace sidebar with Dashboard panel (slide-in)</h3>
+      <p>Dashboard is a panel that slides in over or beside the console. Triggered by a button or icon in the sidebar. Minimal nav changes.</p>
+      <div class="mockup" style="margin-top:12px;">
+        <div class="mockup-header">Slide-in panel</div>
+        <div class="mockup-body" style="padding:12px;font-size:12px;">
+          <div style="display:flex;gap:8px;">
+            <div style="width:40px;background:#111;border-right:1px solid #333;padding:8px;display:flex;flex-direction:column;gap:8px;align-items:center;">
+              <div style="width:20px;height:20px;background:#374151;border-radius:4px;"></div>
+              <div style="width:20px;height:20px;background:#3b82f6;border-radius:4px;"></div>
+            </div>
+            <div style="width:180px;background:#1a1a2e;border-right:1px solid #333;padding:8px;font-size:11px;">
+              <div style="color:#60a5fa;margin-bottom:6px;">Dashboard</div>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;margin-bottom:4px;">
+                <div class="placeholder" style="height:36px;"></div>
+                <div class="placeholder" style="height:36px;"></div>
+              </div>
+              <div class="placeholder" style="height:50px;"></div>
+            </div>
+            <div class="mock-content" style="flex:1;font-size:11px;">Console output</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<p class="subtitle" style="margin-top:16px;">My recommendation: <strong>A (Router)</strong> — cleanest separation, enables future pages, and react-router-dom is tiny. B is good if you want zero new deps. C feels cramped.</p>
