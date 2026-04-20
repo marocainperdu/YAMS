@@ -1,0 +1,37 @@
+services:
+  yams:
+    build: .
+    ports:
+      - "3000:3000"   # HTTP API + static frontend + WebSocket (all on one port)
+    volumes:
+      - ./servers:/app/servers   # bind mount — place server.jar files here from the host
+      - yams_data:/app/data      # named volume — SQLite database
+    environment:
+      - PORT=3000
+      - YAMS_DB=/app/data/yams.db
+      - YAMS_SERVERS_ROOT=/app/servers
+      - NODE_ENV=production
+    restart: unless-stopped
+
+    # Memory ceiling — adjust upward if you run many/large Minecraft servers.
+    # Each server consumes RAM equal to its configured -Xmx value on top of YAMS itself.
+    deploy:
+      resources:
+        limits:
+          memory: 4g
+
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/metrics"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+# ── Minecraft server ports ────────────────────────────────────────────────────
+# Uncomment and extend if you want players to connect from outside the host.
+# Each Minecraft server must have a unique port configured in YAMS.
+#
+#     - "25565:25565"   # default Minecraft port
+
+volumes:
+  yams_data:   # persists the SQLite database across restarts and image rebuilds

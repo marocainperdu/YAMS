@@ -243,6 +243,14 @@ function startServer(id) {
     throw conflict(`Server '${server.name}' is already running`);
   }
 
+  // Path traversal guard: ensure the server directory is inside SERVERS_ROOT.
+  // Prevents a crafted DB entry from escaping the container's data directory.
+  const resolvedPath = path.resolve(server.path);
+  const resolvedRoot = path.resolve(SERVERS_ROOT);
+  if (resolvedPath !== resolvedRoot && !resolvedPath.startsWith(resolvedRoot + path.sep)) {
+    throw badRequest(`Server path escapes SERVERS_ROOT — refusing to start`);
+  }
+
   // server.jar must be present before we attempt to spawn
   if (!fileManager.serverJarExists(server.path)) {
     throw badRequest(

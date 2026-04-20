@@ -73,7 +73,12 @@ export default function useWebSocket() {
   useEffect(() => {
     const connect = () => {
       try {
-        const wsUrl = import.meta.env.VITE_WS_URL || 'ws://localhost:3001';
+        // In Docker / production: WS is on the same host:port as the page (/ws path).
+        // In local dev: Vite proxies /ws → ws://localhost:3000/ws, so this also works.
+        // Override with VITE_WS_URL if you need a non-default target.
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const wsUrl = import.meta.env.VITE_WS_URL
+          || `${protocol}//${window.location.host}/ws`;
         const ws = new WebSocket(wsUrl);
 
         ws.addEventListener('open', () => {

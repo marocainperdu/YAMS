@@ -1,0 +1,34 @@
+# Dependencies — reinstalled inside the image
+node_modules/
+client/node_modules/
+
+# Build artefacts — rebuilt inside the image
+client/dist/
+
+# Runtime data — provided by Docker volumes, not baked into the image
+servers/
+yams.db
+yams.db-wal
+yams.db-shm
+
+# Version control and tooling
+.git/
+.gitignore
+.claude/
+.superpowers/
+
+# Documentation (not needed at runtime)
+docs/
+
+# Logs and temp files
+*.log
+*.tmp
+
+# Environment files (never bake secrets into an image)
+.env
+.env.*
+client/.env
+client/.env.*
+
+# Test files
+test.js
