@@ -185,4 +185,48 @@ async function uploadFile(serverId, destDir, req, overwrite) {
   });
 }
 
-module.exports = { listDirectory, downloadFile, uploadFile, FILE_UPLOAD_LIMIT, FILE_LIST_LIMIT };
+// ─── createFolder ─────────────────────────────────────────────────────────────
+
+async function createFolder(serverId, dirPath) {
+  const { resolved } = resolveSafePath(serverId, dirPath);
+  await fsp.mkdir(resolved, { recursive: true });
+}
+
+// ─── renameFile ───────────────────────────────────────────────────────────────
+
+async function renameFile(serverId, fromPath, toPath) {
+  const { resolved: from, serverRoot } = resolveSafePath(serverId, fromPath);
+  const { resolved: to }               = resolveSafePath(serverId, toPath);
+
+  if (from === serverRoot) throw forbidden('Cannot rename the server root directory');
+
+  await rejectSymlink(from);
+  await fsp.rename(from, to);
+}
+
+// ─── deleteFile ───────────────────────────────────────────────────────────────
+
+async function deleteFile(serverId, filePath) {
+  const { resolved, serverRoot } = resolveSafePath(serverId, filePath);
+
+  if (resolved === serverRoot) throw forbidden('Cannot delete the server root directory');
+
+  const stat = await rejectSymlink(resolved);
+
+  if (stat.isDirectory()) {
+    await fsp.rm(resolved, { recursive: true, force: true });
+  } else {
+    await fsp.unlink(resolved);
+  }
+}
+
+module.exports = {
+  listDirectory,
+  downloadFile,
+  uploadFile,
+  createFolder,
+  renameFile,
+  deleteFile,
+  FILE_UPLOAD_LIMIT,
+  FILE_LIST_LIMIT,
+};
