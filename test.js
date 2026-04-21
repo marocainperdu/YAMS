@@ -357,3 +357,67 @@ describe('Unknown routes', () => {
     assert.ok(body.error);
   });
 });
+
+// ─── fileService: test setup ──────────────────────────────────────────────────
+const fsp  = require('node:fs/promises');
+
+// Set YAMS_SERVERS_ROOT BEFORE requiring fileService so SERVERS_ROOT is correct.
+const TEST_ROOT = fs.mkdtempSync(path.join(os.tmpdir(), 'yams-test-'));
+process.env.YAMS_SERVERS_ROOT = TEST_ROOT;
+
+const TEST_SERVER_ID = 'srv-test-001';
+
+async function setupServerDir(serverId = TEST_SERVER_ID) {
+  const dir = path.join(TEST_ROOT, serverId);
+  await fsp.mkdir(dir, { recursive: true });
+  return dir;
+}
+
+process.on('exit', () => {
+  try { fs.rmSync(TEST_ROOT, { recursive: true, force: true }); } catch {}
+});
+
+// ─── listDirectory ────────────────────────────────────────────────────────────
+test('listDirectory returns files and directories with correct shape', async () => {
+  const { listDirectory } = require('./src/services/fileService');
+  const dir = await setupServerDir();
+
+  await fsp.writeFile(path.join(dir, 'server.properties'), 'server-port=25565');
+  await fsp.mkdir(path.join(dir, 'world'), { recursive: true });
+
+  const result = await listDirectory(TEST_SERVER_ID, '');
+  const names  = result.data.map(e => e.name);
+
+  assert.ok(names.includes('server.properties'));
+  assert.ok(names.includes('world'));
+
+  const file   = result.data.find(e => e.name === 'server.properties');
+  const folder = result.data.find(e => e.name === 'world');
+
+  assert.equal(file.type, 'file');
+  assert.ok(typeof file.size === 'number');
+  assert.ok(typeof file.modified === 'number');
+  assert.equal(folder.type, 'directory');
+  assert.equal(typeof result.truncated, 'boolean');
+});
+
+test('listDirectory rejects path traversal with 403', async () => {
+  const { listDirectory } = require('./src/services/fileService');
+  await setupServerDir();
+
+  await assert.rejects(
+    () => listDirectory(TEST_SERVER_ID, '../other-server'),
+    (err) => err.statusCode === 403
+  );
+});
+
+test('listDirectory rejects absolute path with 403', async () => {
+  const { listDirectory } = require('./src/services/fileService');
+  await setupServerDir();
+
+  await assert.rejects(
+    () => listDirectory(TEST_SERVER_ID, '/etc/passwd'),
+    (err) => err.statusCode === 403
+  );
+});
+
