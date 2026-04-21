@@ -632,3 +632,108 @@ test('deleteFile rejects path traversal with 403', async () => {
   );
 });
 
+// ─── Security: path traversal ─────────────────────────────────────────────────
+test('security: listDirectory blocks all traversal payloads', async () => {
+  const { listDirectory } = require('./src/services/fileService');
+  await setupServerDir();
+
+  const payloads = [
+    '../',
+    '../../',
+    '../../../etc',
+    'subdir/../../../../etc',
+    '/etc/passwd',
+    '/etc',
+  ];
+
+  for (const p of payloads) {
+    await assert.rejects(
+      () => listDirectory(TEST_SERVER_ID, p),
+      (err) => err.statusCode === 403,
+      `Expected 403 for payload: ${JSON.stringify(p)}`
+    );
+  }
+});
+
+test('security: cannot access another server via path traversal', async () => {
+  const { listDirectory } = require('./src/services/fileService');
+
+  const SERVER_A = 'server-alpha';
+  const SERVER_B = 'server-beta';
+  await fsp.mkdir(path.join(TEST_ROOT, SERVER_A), { recursive: true });
+  await fsp.mkdir(path.join(TEST_ROOT, SERVER_B), { recursive: true });
+  await fsp.writeFile(path.join(TEST_ROOT, SERVER_B, 'secret.txt'), 'secret');
+
+  await assert.rejects(
+    () => listDirectory(SERVER_A, '../server-beta'),
+    (err) => err.statusCode === 403
+  );
+});
+
+// ─── Security: symlink rejection ──────────────────────────────────────────────
+test('security: symlink in download path is rejected with 403', async () => {
+  const { downloadFile } = require('./src/services/fileService');
+  const dir = await setupServerDir();
+
+  await fsp.writeFile(path.join(dir, 'real.txt'), 'real content');
+  try {
+    await fsp.symlink(path.join(dir, 'real.txt'), path.join(dir, 'link.txt'));
+  } catch {
+    // Symlinks not supported in this environment — skip
+    return;
+  }
+
+  await assert.rejects(
+    () => downloadFile(TEST_SERVER_ID, 'link.txt'),
+    (err) => err.statusCode === 403
+  );
+});
+
+test('security: symlink in delete path is rejected with 403', async () => {
+  const { deleteFile } = require('./src/services/fileService');
+  const dir = await setupServerDir();
+
+  await fsp.writeFile(path.join(dir, 'real-del.txt'), 'real');
+  try {
+    await fsp.symlink(path.join(dir, 'real-del.txt'), path.join(dir, 'link-del.txt'));
+  } catch {
+    return;
+  }
+
+  await assert.rejects(
+    () => deleteFile(TEST_SERVER_ID, 'link-del.txt'),
+    (err) => err.statusCode === 403
+  );
+});
+
+// ─── Security: root deletion ──────────────────────────────────────────────────
+test('security: deleteFile rejects server root via empty string', async () => {
+  const { deleteFile } = require('./src/services/fileService');
+  await setupServerDir();
+
+  await assert.rejects(
+    () => deleteFile(TEST_SERVER_ID, ''),
+    (err) => err.statusCode === 403
+  );
+});
+
+test('security: deleteFile rejects server root via dot', async () => {
+  const { deleteFile } = require('./src/services/fileService');
+  await setupServerDir();
+
+  await assert.rejects(
+    () => deleteFile(TEST_SERVER_ID, '.'),
+    (err) => err.statusCode === 403
+  );
+});
+
+test('security: renameFile rejects server root via empty string', async () => {
+  const { renameFile } = require('./src/services/fileService');
+  await setupServerDir();
+
+  await assert.rejects(
+    () => renameFile(TEST_SERVER_ID, '', 'new-name'),
+    (err) => err.statusCode === 403
+  );
+});
+
