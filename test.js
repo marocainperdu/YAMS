@@ -86,6 +86,25 @@ function waitForServer(timeout = 6000) {
 }
 
 // ---------------------------------------------------------------------------
+// Unit tests (errors.js)
+// ---------------------------------------------------------------------------
+
+test('forbidden() returns AppError with statusCode 403', () => {
+  const { forbidden } = require('./src/utils/errors');
+  const err = forbidden('Access denied');
+  assert.equal(err.statusCode, 403);
+  assert.equal(err.isOperational, true);
+  assert.equal(err.message, 'Access denied');
+});
+
+test('forbidden() uses default message when none provided', () => {
+  const { forbidden } = require('./src/utils/errors');
+  const err = forbidden();
+  assert.equal(err.statusCode, 403);
+  assert.equal(err.message, 'Forbidden');
+});
+
+// ---------------------------------------------------------------------------
 // Lifecycle
 // ---------------------------------------------------------------------------
 
