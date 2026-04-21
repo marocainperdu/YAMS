@@ -464,3 +464,66 @@ test('downloadFile rejects path traversal with 403', async () => {
   );
 });
 
+// ─── uploadFile ───────────────────────────────────────────────────────────────
+const { Readable } = require('node:stream');
+
+function buildMultipart(filename, content) {
+  const boundary = '----TestBoundary7777';
+  const body = Buffer.concat([
+    Buffer.from(
+      `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${filename}"\r\n` +
+      `Content-Type: application/octet-stream\r\n\r\n`
+    ),
+    Buffer.isBuffer(content) ? content : Buffer.from(content),
+    Buffer.from(`\r\n--${boundary}--\r\n`),
+  ]);
+  return { body, boundary };
+}
+
+function fakeReq(body, boundary) {
+  const stream = Readable.from([body]);
+  stream.headers = {
+    'content-type':   `multipart/form-data; boundary=${boundary}`,
+    'content-length': String(body.length),
+  };
+  return stream;
+}
+
+test('uploadFile saves a file to the server directory', async () => {
+  const { uploadFile } = require('./src/services/fileService');
+  const dir = await setupServerDir();
+
+  const { body, boundary } = buildMultipart('uploaded.txt', 'hello world');
+  await uploadFile(TEST_SERVER_ID, '', fakeReq(body, boundary), false);
+
+  const content = await fsp.readFile(path.join(dir, 'uploaded.txt'), 'utf8');
+  assert.equal(content, 'hello world');
+});
+
+test('uploadFile returns 409 if file exists and overwrite=false', async () => {
+  const { uploadFile } = require('./src/services/fileService');
+  const dir = await setupServerDir();
+  await fsp.writeFile(path.join(dir, 'existing.txt'), 'original');
+
+  const { body, boundary } = buildMultipart('existing.txt', 'new content');
+  await assert.rejects(
+    () => uploadFile(TEST_SERVER_ID, '', fakeReq(body, boundary), false),
+    (err) => err.statusCode === 409
+  );
+
+  const content = await fsp.readFile(path.join(dir, 'existing.txt'), 'utf8');
+  assert.equal(content, 'original', 'Original file must be untouched');
+});
+
+test('uploadFile overwrites if overwrite=true', async () => {
+  const { uploadFile } = require('./src/services/fileService');
+  const dir = await setupServerDir();
+  await fsp.writeFile(path.join(dir, 'replace-me.txt'), 'original');
+
+  const { body, boundary } = buildMultipart('replace-me.txt', 'replaced');
+  await uploadFile(TEST_SERVER_ID, '', fakeReq(body, boundary), true);
+
+  const content = await fsp.readFile(path.join(dir, 'replace-me.txt'), 'utf8');
+  assert.equal(content, 'replaced');
+});
+
