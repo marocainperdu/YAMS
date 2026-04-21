@@ -26,7 +26,10 @@ const notFound = (msg) => new AppError(msg || 'Not found', 404);
 /** 409 Conflict */
 const conflict = (msg) => new AppError(msg || 'Conflict', 409);
 
+/** 403 Forbidden */
+const forbidden = (msg) => new AppError(msg || 'Forbidden', 403);
+
 /** 500 Internal Server Error (operational) */
 const internal = (msg) => new AppError(msg || 'Internal server error', 500);
 
-module.exports = { AppError, badRequest, notFound, conflict, internal };
+module.exports = { AppError, badRequest, notFound, conflict, forbidden, internal };
