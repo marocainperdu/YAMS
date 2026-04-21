@@ -527,3 +527,108 @@ test('uploadFile overwrites if overwrite=true', async () => {
   assert.equal(content, 'replaced');
 });
 
+// ─── createFolder ─────────────────────────────────────────────────────────────
+test('createFolder creates a nested directory', async () => {
+  const { createFolder } = require('./src/services/fileService');
+  const dir = await setupServerDir();
+
+  await createFolder(TEST_SERVER_ID, 'plugins/myplugin');
+
+  const stat = await fsp.stat(path.join(dir, 'plugins', 'myplugin'));
+  assert.ok(stat.isDirectory());
+});
+
+test('createFolder is idempotent when directory already exists', async () => {
+  const { createFolder } = require('./src/services/fileService');
+  const dir = await setupServerDir();
+  await fsp.mkdir(path.join(dir, 'already'), { recursive: true });
+
+  // Must not throw
+  await createFolder(TEST_SERVER_ID, 'already');
+});
+
+test('createFolder rejects path traversal with 403', async () => {
+  const { createFolder } = require('./src/services/fileService');
+  await setupServerDir();
+
+  await assert.rejects(
+    () => createFolder(TEST_SERVER_ID, '../escape'),
+    (err) => err.statusCode === 403
+  );
+});
+
+// ─── renameFile ───────────────────────────────────────────────────────────────
+test('renameFile moves a file within the server root', async () => {
+  const { renameFile } = require('./src/services/fileService');
+  const dir = await setupServerDir();
+  await fsp.writeFile(path.join(dir, 'src-rename.txt'), 'data');
+
+  await renameFile(TEST_SERVER_ID, 'src-rename.txt', 'dst-rename.txt');
+
+  await assert.rejects(() => fsp.access(path.join(dir, 'src-rename.txt')));
+  const content = await fsp.readFile(path.join(dir, 'dst-rename.txt'), 'utf8');
+  assert.equal(content, 'data');
+});
+
+test('renameFile rejects traversal in `from` with 403', async () => {
+  const { renameFile } = require('./src/services/fileService');
+  await setupServerDir();
+
+  await assert.rejects(
+    () => renameFile(TEST_SERVER_ID, '../../etc/passwd', 'safe.txt'),
+    (err) => err.statusCode === 403
+  );
+});
+
+test('renameFile rejects renaming server root with 403', async () => {
+  const { renameFile } = require('./src/services/fileService');
+  await setupServerDir();
+
+  await assert.rejects(
+    () => renameFile(TEST_SERVER_ID, '', 'new-name'),
+    (err) => err.statusCode === 403
+  );
+});
+
+// ─── deleteFile ───────────────────────────────────────────────────────────────
+test('deleteFile removes a file', async () => {
+  const { deleteFile } = require('./src/services/fileService');
+  const dir = await setupServerDir();
+  await fsp.writeFile(path.join(dir, 'delete-me.txt'), 'bye');
+
+  await deleteFile(TEST_SERVER_ID, 'delete-me.txt');
+
+  await assert.rejects(() => fsp.access(path.join(dir, 'delete-me.txt')));
+});
+
+test('deleteFile removes a directory recursively', async () => {
+  const { deleteFile } = require('./src/services/fileService');
+  const dir = await setupServerDir();
+  await fsp.mkdir(path.join(dir, 'old-world', 'region'), { recursive: true });
+  await fsp.writeFile(path.join(dir, 'old-world', 'region', 'r.0.0.mca'), '');
+
+  await deleteFile(TEST_SERVER_ID, 'old-world');
+
+  await assert.rejects(() => fsp.access(path.join(dir, 'old-world')));
+});
+
+test('deleteFile rejects deletion of server root via empty string with 403', async () => {
+  const { deleteFile } = require('./src/services/fileService');
+  await setupServerDir();
+
+  await assert.rejects(
+    () => deleteFile(TEST_SERVER_ID, ''),
+    (err) => err.statusCode === 403
+  );
+});
+
+test('deleteFile rejects path traversal with 403', async () => {
+  const { deleteFile } = require('./src/services/fileService');
+  await setupServerDir();
+
+  await assert.rejects(
+    () => deleteFile(TEST_SERVER_ID, '../other-server'),
+    (err) => err.statusCode === 403
+  );
+});
+
