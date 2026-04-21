@@ -1,5 +1,6 @@
 'use strict';
 
+const busboy = require('busboy');
 const path = require('path');
 const fsp  = require('fs/promises');
 const fs   = require('fs');
@@ -103,4 +104,85 @@ async function downloadFile(serverId, filePath) {
   return { stream, filename, contentType, size: stat.size };
 }
 
-module.exports = { listDirectory, downloadFile, FILE_UPLOAD_LIMIT, FILE_LIST_LIMIT };
+// ─── uploadFile ───────────────────────────────────────────────────────────────
+
+async function uploadFile(serverId, destDir, req, overwrite) {
+  const { resolved: destResolved } = resolveSafePath(serverId, destDir);
+
+  return new Promise((resolve, reject) => {
+    let tmpPath          = null;
+    let finalPath        = null;
+    let writeError       = null;
+    let overwriteBlocked = false;
+    let sizeExceeded     = false;
+
+    const bb = busboy({
+      headers: req.headers,
+      limits: { files: 1, fileSize: FILE_UPLOAD_LIMIT },
+    });
+
+    bb.on('file', async (fieldname, stream, info) => {
+      try {
+        const filename = path.basename(info.filename || '');
+        if (!filename) {
+          stream.resume();
+          return reject(badRequest('Uploaded file has no name'));
+        }
+
+        const { resolved: fp } = resolveSafePath(serverId, path.join(destDir, filename));
+        finalPath = fp;
+        tmpPath   = finalPath + '.yams_tmp';
+
+        // Check overwrite BEFORE consuming the stream (fail fast)
+        const exists = await fsp.access(finalPath).then(() => true).catch(() => false);
+        if (exists && !overwrite) {
+          overwriteBlocked = true;
+          stream.resume(); // drain without writing
+          return;
+        }
+
+        const ws = fs.createWriteStream(tmpPath);
+
+        stream.on('limit', () => {
+          sizeExceeded = true;
+          stream.destroy();
+          ws.destroy();
+        });
+
+        stream.pipe(ws);
+        ws.on('error', (err) => { writeError = err; });
+      } catch (err) {
+        stream.resume();
+        reject(err);
+      }
+    });
+
+    bb.on('close', async () => {
+      try {
+        if (sizeExceeded) {
+          if (tmpPath) await fsp.unlink(tmpPath).catch(() => {});
+          return reject(badRequest(`File exceeds the ${FILE_UPLOAD_LIMIT}-byte upload limit`));
+        }
+        if (overwriteBlocked) {
+          return reject(conflict('File already exists. Send overwrite=true to replace it'));
+        }
+        if (writeError) {
+          if (tmpPath) await fsp.unlink(tmpPath).catch(() => {});
+          return reject(writeError);
+        }
+        if (!finalPath) {
+          return reject(badRequest('No file was provided in the request'));
+        }
+        await fsp.rename(tmpPath, finalPath);
+        resolve({ name: path.basename(finalPath) });
+      } catch (err) {
+        reject(err);
+      }
+    });
+
+    bb.on('error', reject);
+    req.pipe(bb);
+  });
+}
+
+module.exports = { listDirectory, downloadFile, uploadFile, FILE_UPLOAD_LIMIT, FILE_LIST_LIMIT };
