@@ -17,6 +17,7 @@ const { getDb } = require('./src/db');
 require('./src/services/serverService');
 
 const serverRoutes = require('./src/routes/serverRoutes');
+const fileRoutes   = require('./src/routes/fileRoutes');
 const metricsRoutes = require('./src/routes/metricsRoutes');
 const swaggerSpec = require('./src/swagger');
 const { createWsServer } = require('./src/websocket/wsServer');
@@ -41,6 +42,7 @@ app.use((req, _res, next) => {
 // ---------------------------------------------------------------------------
 
 app.use('/servers', serverRoutes);
+app.use('/servers/:id/files', fileRoutes);
 app.use('/metrics', metricsRoutes);
 app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 
@@ -101,6 +103,12 @@ const server = app.listen(PORT, () => {
   console.log('  GET    /servers/:id');
   console.log('  POST   /servers/:id/start');
   console.log('  POST   /servers/:id/stop');
+  console.log('  GET    /servers/:id/files');
+  console.log('  GET    /servers/:id/files/download?path=');
+  console.log('  POST   /servers/:id/files/upload');
+  console.log('  POST   /servers/:id/files/mkdir');
+  console.log('  PUT    /servers/:id/files/rename');
+  console.log('  DELETE /servers/:id/files');
   console.log('  GET    /metrics');
   console.log(`  WS     ws://localhost:${PORT}/ws`);
   console.log(`  Docs   http://localhost:${PORT}/api-docs`);
