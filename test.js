@@ -421,3 +421,46 @@ test('listDirectory rejects absolute path with 403', async () => {
   );
 });
 
+// ─── downloadFile ─────────────────────────────────────────────────────────────
+test('downloadFile returns a readable stream and metadata', async () => {
+  const { downloadFile } = require('./src/services/fileService');
+  const dir = await setupServerDir();
+
+  await fsp.writeFile(path.join(dir, 'eula.txt'), 'eula=true');
+
+  const result = await downloadFile(TEST_SERVER_ID, 'eula.txt');
+  assert.ok(result.stream,                        'should return a stream');
+  assert.equal(result.filename, 'eula.txt');
+  assert.ok(typeof result.contentType === 'string');
+  assert.ok(typeof result.size === 'number');
+
+  const chunks = [];
+  await new Promise((resolve, reject) => {
+    result.stream.on('data', c => chunks.push(c));
+    result.stream.on('end', resolve);
+    result.stream.on('error', reject);
+  });
+  assert.equal(Buffer.concat(chunks).toString(), 'eula=true');
+});
+
+test('downloadFile rejects a directory with 400', async () => {
+  const { downloadFile } = require('./src/services/fileService');
+  const dir = await setupServerDir();
+  await fsp.mkdir(path.join(dir, 'plugins'), { recursive: true });
+
+  await assert.rejects(
+    () => downloadFile(TEST_SERVER_ID, 'plugins'),
+    (err) => err.statusCode === 400
+  );
+});
+
+test('downloadFile rejects path traversal with 403', async () => {
+  const { downloadFile } = require('./src/services/fileService');
+  await setupServerDir();
+
+  await assert.rejects(
+    () => downloadFile(TEST_SERVER_ID, '../../../etc/passwd'),
+    (err) => err.statusCode === 403
+  );
+});
+

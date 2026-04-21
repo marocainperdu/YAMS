@@ -87,4 +87,20 @@ async function listDirectory(serverId, dirPath = '') {
   return { data, truncated };
 }
 
-module.exports = { listDirectory, FILE_UPLOAD_LIMIT, FILE_LIST_LIMIT };
+// ─── downloadFile ─────────────────────────────────────────────────────────────
+
+async function downloadFile(serverId, filePath) {
+  const { resolved } = resolveSafePath(serverId, filePath);
+  const stat = await rejectSymlink(resolved);
+
+  if (stat.isDirectory()) throw badRequest('Cannot download a directory');
+
+  const ext         = path.extname(resolved).toLowerCase();
+  const contentType = MIME[ext] || DEFAULT_MIME;
+  const filename    = path.basename(resolved);
+  const stream      = fs.createReadStream(resolved);
+
+  return { stream, filename, contentType, size: stat.size };
+}
+
+module.exports = { listDirectory, downloadFile, FILE_UPLOAD_LIMIT, FILE_LIST_LIMIT };
