@@ -70,13 +70,12 @@ async function listDirectory(serverId, dirPath = '') {
     throw err;
   }
 
-  const truncated = entries.length > FILE_LIST_LIMIT;
-  const slice     = entries.slice(0, FILE_LIST_LIMIT);
+  const nonSymlinks = entries.filter(e => !e.isSymbolicLink());
+  const truncated   = nonSymlinks.length > FILE_LIST_LIMIT;
+  const slice       = nonSymlinks.slice(0, FILE_LIST_LIMIT);
 
   const data = await Promise.all(
-    slice
-      .filter(e => !e.isSymbolicLink())  // silently skip symlinks
-      .map(async (e) => {
+    slice.map(async (e) => {
         const stat = await fsp.stat(path.join(resolved, e.name)).catch(() => null);
         if (e.isDirectory()) {
           return { name: e.name, type: 'directory', modified: stat ? stat.mtimeMs : null };
@@ -107,14 +106,22 @@ async function downloadFile(serverId, filePath) {
 // ─── uploadFile ───────────────────────────────────────────────────────────────
 
 async function uploadFile(serverId, destDir, req, overwrite) {
-  const { resolved: destResolved } = resolveSafePath(serverId, destDir);
+  resolveSafePath(serverId, destDir);
 
   return new Promise((resolve, reject) => {
     let tmpPath          = null;
     let finalPath        = null;
+    let ws               = null;
     let writeError       = null;
     let overwriteBlocked = false;
     let sizeExceeded     = false;
+    let rejected         = false;
+
+    function safeReject(err) {
+      if (rejected) return;
+      rejected = true;
+      reject(err);
+    }
 
     const bb = busboy({
       headers: req.headers,
@@ -126,7 +133,7 @@ async function uploadFile(serverId, destDir, req, overwrite) {
         const filename = path.basename(info.filename || '');
         if (!filename) {
           stream.resume();
-          return reject(badRequest('Uploaded file has no name'));
+          return safeReject(badRequest('Uploaded file has no name'));
         }
 
         const { resolved: fp } = resolveSafePath(serverId, path.join(destDir, filename));
@@ -141,7 +148,7 @@ async function uploadFile(serverId, destDir, req, overwrite) {
           return;
         }
 
-        const ws = fs.createWriteStream(tmpPath);
+        ws = fs.createWriteStream(tmpPath);
 
         stream.on('limit', () => {
           sizeExceeded = true;
@@ -153,7 +160,7 @@ async function uploadFile(serverId, destDir, req, overwrite) {
         ws.on('error', (err) => { writeError = err; });
       } catch (err) {
         stream.resume();
-        reject(err);
+        safeReject(err);
       }
     });
 
@@ -161,26 +168,33 @@ async function uploadFile(serverId, destDir, req, overwrite) {
       try {
         if (sizeExceeded) {
           if (tmpPath) await fsp.unlink(tmpPath).catch(() => {});
-          return reject(badRequest(`File exceeds the ${FILE_UPLOAD_LIMIT}-byte upload limit`));
+          return safeReject(badRequest(`File exceeds the ${FILE_UPLOAD_LIMIT}-byte upload limit`));
         }
         if (overwriteBlocked) {
-          return reject(conflict('File already exists. Send overwrite=true to replace it'));
+          return safeReject(conflict('File already exists. Send overwrite=true to replace it'));
         }
         if (writeError) {
           if (tmpPath) await fsp.unlink(tmpPath).catch(() => {});
-          return reject(writeError);
+          return safeReject(writeError);
         }
         if (!finalPath) {
-          return reject(badRequest('No file was provided in the request'));
+          return safeReject(badRequest('No file was provided in the request'));
+        }
+        // Await write stream flush before renaming
+        if (ws && !ws.writableFinished) {
+          await new Promise((res, rej) => {
+            ws.on('finish', res);
+            ws.on('error', rej);
+          });
         }
         await fsp.rename(tmpPath, finalPath);
         resolve({ name: path.basename(finalPath) });
       } catch (err) {
-        reject(err);
+        safeReject(err);
       }
     });
 
-    bb.on('error', reject);
+    bb.on('error', safeReject);
     req.pipe(bb);
   });
 }
@@ -201,6 +215,16 @@ async function renameFile(serverId, fromPath, toPath) {
   if (from === serverRoot) throw forbidden('Cannot rename the server root directory');
 
   await rejectSymlink(from);
+
+  // Ensure destination is not a symlink
+  try {
+    const toStat = await fsp.lstat(to);
+    if (toStat.isSymbolicLink()) throw forbidden('Destination is a symlink');
+  } catch (err) {
+    if (err.code !== 'ENOENT') throw err;
+    // ENOENT means destination doesn't exist yet — that's fine
+  }
+
   await fsp.rename(from, to);
 }
 
