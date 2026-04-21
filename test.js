@@ -60,7 +60,7 @@ function waitForServer(timeout = 6000) {
     const deadline = setTimeout(() => reject(new Error('Test server did not start in time')), timeout);
 
     serverProcess.stdout.on('data', (chunk) => {
-      if (chunk.toString().includes('running on')) {
+      if (chunk.toString().includes('Running on')) {
         clearTimeout(deadline);
         resolve();
       }
