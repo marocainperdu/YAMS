@@ -352,7 +352,7 @@ describe('POST /servers/:id/stop', () => {
 
 describe('Unknown routes', () => {
   test('404 for routes that do not exist', async () => {
-    const { status, body } = await api('GET', '/does-not-exist');
+    const { status, body } = await api('POST', '/does-not-exist');
     assert.equal(status, 404);
     assert.ok(body.error);
   });
