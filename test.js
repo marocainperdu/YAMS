@@ -352,7 +352,7 @@ describe('POST /servers/:id/stop', () => {
 
 describe('Unknown routes', () => {
   test('404 for routes that do not exist', async () => {
-    const { status, body } = await api('GET', '/does-not-exist');
+    const { status, body } = await api('POST', '/does-not-exist');
     assert.equal(status, 404);
     assert.ok(body.error);
   });
@@ -399,6 +399,10 @@ test('listDirectory returns files and directories with correct shape', async () 
   assert.ok(typeof file.modified === 'number');
   assert.equal(folder.type, 'directory');
   assert.equal(typeof result.truncated, 'boolean');
+
+  const folderIdx = result.data.findIndex(e => e.name === 'world');
+  const fileIdx   = result.data.findIndex(e => e.name === 'server.properties');
+  assert.ok(folderIdx < fileIdx, 'directories must sort before files');
 });
 
 test('listDirectory rejects path traversal with 403', async () => {
