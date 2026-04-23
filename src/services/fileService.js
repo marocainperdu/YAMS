@@ -245,18 +245,47 @@ async function renameFile(serverId, fromPath, toPath) {
 
   if (from === serverRoot) throw forbidden('Cannot rename the server root directory');
 
-  await rejectSymlink(from);
+  if (from === to) return;
 
-  // Ensure destination is not a symlink
+  await rejectSymlinkDeep(from, serverRoot);
+  await rejectSymlinkDeep(path.dirname(to), serverRoot);
+
+  // Source-chain check is not TOCTOU-safe: a race win after this point may
+  // redirect the source read outside the sandbox.
+  // This may result in importing arbitrary host files into the server directory.
   try {
-    const toStat = await fsp.lstat(to);
-    if (toStat.isSymbolicLink()) throw forbidden('Destination is a symlink');
+    await fsp.rename(from, to);
   } catch (err) {
-    if (err.code !== 'ENOENT') throw err;
-    // ENOENT means destination doesn't exist yet — that's fine
+    if (err.code === 'ENOENT') throw notFound('Path not found');
+    if (err.code !== 'EXDEV') throw err;
+
+    let fromStat;
+    try {
+      fromStat = await fsp.lstat(from);
+    } catch (statErr) {
+      if (statErr.code === 'ENOENT') throw notFound('Source file not found');
+      throw statErr;
+    }
+    if (fromStat.isDirectory()) throw badRequest('Cross-device directory rename not supported');
+
+    // EXDEV fallback may overwrite destination non-atomically.
+    await fsp.copyFile(from, to);
+    try {
+      await rejectSymlinkDeep(to, serverRoot);
+    } catch (guardErr) {
+      await fsp.unlink(to).catch(() => {});
+      throw guardErr;
+    }
+    await fsp.unlink(from);
+    return;
   }
 
-  await fsp.rename(from, to);
+  try {
+    await rejectSymlinkDeep(to, serverRoot);
+  } catch (err) {
+    await fsp.unlink(to).catch(() => {});
+    throw err;
+  }
 }
 
 // ─── deleteFile ───────────────────────────────────────────────────────────────
