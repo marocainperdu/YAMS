@@ -56,6 +56,24 @@ async function rejectSymlink(resolvedPath) {
   return stat;
 }
 
+async function rejectSymlinkDeep(resolvedPath, rootPath) {
+  const relative = path.relative(rootPath, resolvedPath);
+  if (!relative) return; // resolvedPath IS rootPath — nothing to walk
+  const segments = relative.split(path.sep).filter(Boolean);
+  let current = rootPath;
+  for (const segment of segments) {
+    current = path.join(current, segment);
+    let stat;
+    try {
+      stat = await fsp.lstat(current);
+    } catch (err) {
+      if (err.code === 'ENOENT') return; // path doesn't exist here or below — safe
+      throw err;
+    }
+    if (stat.isSymbolicLink()) throw forbidden('Symlinks are not permitted');
+  }
+}
+
 // ─── listDirectory ───────────────────────────────────────────────────────────
 
 async function listDirectory(serverId, dirPath = '') {
@@ -111,7 +129,8 @@ async function downloadFile(serverId, filePath) {
 // ─── uploadFile ───────────────────────────────────────────────────────────────
 
 async function uploadFile(serverId, destDir, req, overwrite) {
-  resolveSafePath(serverId, destDir);
+  const { resolved: destResolved, serverRoot } = resolveSafePath(serverId, destDir);
+  await rejectSymlinkDeep(destResolved, serverRoot);
 
   return new Promise((resolve, reject) => {
     let tmpPath          = null;
@@ -193,6 +212,12 @@ async function uploadFile(serverId, destDir, req, overwrite) {
           });
         }
         await fsp.rename(tmpPath, finalPath);
+        try {
+          await rejectSymlinkDeep(finalPath, serverRoot);
+        } catch (err) {
+          await fsp.unlink(finalPath).catch(() => {});
+          return safeReject(err);
+        }
         resolve({ name: path.basename(finalPath) });
       } catch (err) {
         safeReject(err);
@@ -207,7 +232,8 @@ async function uploadFile(serverId, destDir, req, overwrite) {
 // ─── createFolder ─────────────────────────────────────────────────────────────
 
 async function createFolder(serverId, dirPath) {
-  const { resolved } = resolveSafePath(serverId, dirPath);
+  const { resolved, serverRoot } = resolveSafePath(serverId, dirPath);
+  await rejectSymlinkDeep(resolved, serverRoot);
   await fsp.mkdir(resolved, { recursive: true });
 }
 
