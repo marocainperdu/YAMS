@@ -84,6 +84,11 @@ async function listDirectory(serverId, dirPath = '') {
       })
   );
 
+  data.sort((a, b) => {
+    if (a.type !== b.type) return a.type === 'directory' ? -1 : 1;
+    return a.name.localeCompare(b.name, 'en', { sensitivity: 'base' });
+  });
+
   return { data, truncated };
 }
 
