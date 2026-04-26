@@ -243,6 +243,14 @@ function startServer(id) {
     throw conflict(`Server '${server.name}' is already running`);
   }
 
+  // Block start while a restore is extracting files — stopServer() sets DB to
+  // 'stopped' before the JVM exits, so the guard above cannot detect this window.
+  // Lazy-require avoids the circular dependency (backupService ↔ serverService).
+  const { isRestoring } = require('./backupService');
+  if (isRestoring(id)) {
+    throw conflict(`Server '${server.name}' has a restore in progress`);
+  }
+
   // Path traversal guard: ensure the server directory is inside SERVERS_ROOT.
   // Prevents a crafted DB entry from escaping the container's data directory.
   const resolvedPath = path.resolve(server.path);

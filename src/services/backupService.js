@@ -123,6 +123,9 @@ async function createBackup(serverId, serverPathOrId) {
   // Support unit-test shorthand: createBackup(id) with id == relative dir name
   const serverRoot = resolveServerRoot(serverPathOrId || serverId);
 
+  if (activeRestores.has(serverId)) {
+    throw conflict('A restore is in progress for this server; cannot create backup');
+  }
   if (activeBackups.has(serverId)) {
     throw conflict('A backup is already in progress for this server');
   }
@@ -210,8 +213,11 @@ async function streamBackup(serverPathOrId, backupId, res) {
 async function restoreBackup(serverId, backupId, serverPathOrId) {
   const serverRoot = resolveServerRoot(serverPathOrId || serverId);
 
-  // BUG 2 FIX: prevent concurrent restores — must happen before the first await
-  // so both simultaneous callers cannot both pass the check before either runs add().
+  // Prevent concurrent restores, and block restore while a backup is in progress.
+  // All checks must happen before the first await to eliminate the JS race window.
+  if (activeBackups.has(serverId)) {
+    throw conflict('A backup is in progress for this server; cannot restore');
+  }
   if (activeRestores.has(serverId)) {
     throw conflict('A restore is already in progress for this server');
   }
@@ -309,4 +315,8 @@ async function restoreBackup(serverId, backupId, serverPathOrId) {
   }
 }
 
-module.exports = { createBackup, listBackups, findBackup, deleteBackup, streamBackup, restoreBackup };
+function isRestoring(serverId) {
+  return activeRestores.has(serverId);
+}
+
+module.exports = { createBackup, listBackups, findBackup, deleteBackup, streamBackup, restoreBackup, isRestoring };
