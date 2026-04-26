@@ -629,9 +629,24 @@ function getServer(id) {
   return server;
 }
 
+/**
+ * Return the live ChildProcess for a running server, or null if not running.
+ * Used by restoreBackup() to await the real OS-level process exit before
+ * touching the filesystem — the DB status is not a reliable signal because
+ * stopServer() writes 'stopped' before the JVM has actually exited.
+ *
+ * @param {string} serverId
+ * @returns {import('child_process').ChildProcess | null}
+ */
+function getChildProcess(serverId) {
+  const entry = processes.get(serverId);
+  return entry ? entry.child : null;
+}
+
 module.exports = {
   createServer, startServer, stopServer, listServers, getServer,
   subscribe, unsubscribe, sendCommand,
+  getChildProcess,
   streamEmitter,
   getObservability: observability.getObservability,
   getMetricsSnapshot,

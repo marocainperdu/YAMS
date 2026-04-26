@@ -21,6 +21,9 @@ const EXCLUDE_DIRS = new Set(['logs', 'crash-reports', 'backups']);
 // Server IDs currently being backed up — prevents concurrent backups per server
 const activeBackups = new Set();
 
+// Server IDs currently being restored — prevents concurrent restores per server
+const activeRestores = new Set();
+
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // ─── Path helpers ─────────────────────────────────────────────────────────────
@@ -206,56 +209,103 @@ async function streamBackup(serverPathOrId, backupId, res) {
  */
 async function restoreBackup(serverId, backupId, serverPathOrId) {
   const serverRoot = resolveServerRoot(serverPathOrId || serverId);
-  const backup     = await findBackup(serverRoot, backupId);
 
-  // Lazy-require to avoid circular dependency with serverService
-  const serverModel = require('../models/serverModel');
-  const server = serverModel.findById(serverId);
-  if (!server) throw notFound('Server not found');
+  // BUG 2 FIX: prevent concurrent restores — must happen before the first await
+  // so both simultaneous callers cannot both pass the check before either runs add().
+  if (activeRestores.has(serverId)) {
+    throw conflict('A restore is already in progress for this server');
+  }
+  activeRestores.add(serverId);
 
-  // 1. Stop server if running, then wait for full shutdown
-  if (server.status === 'running') {
-    const { stopServer } = require('./serverService');
-    await stopServer(serverId);
+  try {
+    const backup = await findBackup(serverRoot, backupId);
 
-    const deadline = Date.now() + 30_000;
-    while (true) {
-      const current = serverModel.findById(serverId);
-      if (!current || current.status !== 'running') break;
-      if (Date.now() > deadline) {
-        throw internal('Server did not stop within 30 s; restore aborted');
+    // Lazy-require to avoid circular dependency with serverService
+    const serverModel = require('../models/serverModel');
+    const server = serverModel.findById(serverId);
+    if (!server) throw notFound('Server not found');
+
+    // 1. BUG 1 FIX: stop the server and wait for the real OS-level process exit.
+    //
+    //    stopServer() writes 'stopped' to the DB before the JVM exits, so polling
+    //    DB status exits the loop immediately while the JVM is still writing chunk
+    //    data.  Instead, we capture the ChildProcess reference BEFORE calling
+    //    stopServer() (which removes it from the processes Map), then await the
+    //    real 'exit' event that libuv emits only when the OS process has fully exited.
+    if (server.status === 'running') {
+      const { stopServer, getChildProcess } = require('./serverService');
+      const child = getChildProcess(serverId); // capture before stopServer clears the Map
+
+      // Attach listener BEFORE sending the stop signal so the 'exit' event is
+      // never missed — required for correctness when stopServer() becomes async,
+      // or when EventEmitter mocks emit 'exit' synchronously in tests.
+      let waitForExit = Promise.resolve();
+      if (child) {
+        waitForExit = new Promise((resolve, reject) => {
+          const timeout = setTimeout(
+            () => reject(internal('Server did not stop within 30 s; restore aborted')),
+            30_000
+          );
+          child.once('exit', () => {
+            clearTimeout(timeout);
+            resolve();
+          });
+        });
       }
-      await new Promise(r => setTimeout(r, 500));
+
+      stopServer(serverId); // signal sent AFTER listener is attached
+      await waitForExit;
     }
-  }
 
-  // 2. Validate archive integrity and guard against zip-slip — BEFORE any deletion
-  let zipDir;
-  try {
-    zipDir = await unzipper.Open.file(backup.filePath);
-  } catch (err) {
-    throw badRequest(`Invalid or corrupted zip archive: ${err.message}`);
-  }
-
-  for (const file of zipDir.files) {
-    const normalized = path.normalize(file.path);
-    if (path.isAbsolute(normalized) || normalized.startsWith('..')) {
-      throw badRequest(`Unsafe path in archive: ${file.path}`);
+    // 2. Validate archive integrity and guard against zip-slip — BEFORE any deletion
+    let zipDir;
+    try {
+      zipDir = await unzipper.Open.file(backup.filePath);
+    } catch (err) {
+      throw badRequest(`Invalid or corrupted zip archive: ${err.message}`);
     }
-  }
 
-  // 3. Delete current world directories (safe list only)
-  for (const worldDir of WORLD_DIRS) {
-    const worldPath = path.join(serverRoot, worldDir);
-    if (!worldPath.startsWith(serverRoot + path.sep)) continue;
-    try { await fsp.rm(worldPath, { recursive: true, force: true }); } catch { /* may not exist */ }
-  }
+    for (const file of zipDir.files) {
+      const normalized = path.normalize(file.path);
+      if (path.isAbsolute(normalized) || normalized.startsWith('..')) {
+        throw badRequest(`Unsafe path in archive: ${file.path}`);
+      }
+    }
 
-  // 4. Extract backup into server root
-  try {
-    await zipDir.extract({ path: serverRoot, concurrency: 5 });
-  } catch (err) {
-    throw internal(`Extraction failed: ${err.message}`);
+    // 3. Save world directories as .restore-bak before deletion so we can
+    //    roll back if extraction fails for any non-zip reason (disk full, I/O error).
+    const savedWorlds = [];
+    for (const worldDir of WORLD_DIRS) {
+      const worldPath = path.join(serverRoot, worldDir);
+      if (!worldPath.startsWith(serverRoot + path.sep)) continue;
+      const bakPath = `${worldPath}.restore-bak`;
+      try {
+        await fsp.access(worldPath);
+        await fsp.rm(bakPath, { recursive: true, force: true }); // remove stale bak if present
+        await fsp.rename(worldPath, bakPath);
+        savedWorlds.push({ worldPath, bakPath });
+      } catch { /* world dir does not exist — nothing to save */ }
+    }
+
+    // 4. Extract backup into server root; roll back on failure
+    try {
+      await zipDir.extract({ path: serverRoot, concurrency: 5 });
+      // Success: remove the .restore-bak safety copies
+      for (const { bakPath } of savedWorlds) {
+        await fsp.rm(bakPath, { recursive: true, force: true }).catch(() => {});
+      }
+    } catch (err) {
+      // Roll back: restore the saved world directories
+      for (const { worldPath, bakPath } of savedWorlds) {
+        try {
+          await fsp.rm(worldPath, { recursive: true, force: true });
+          await fsp.rename(bakPath, worldPath);
+        } catch { /* best-effort rollback */ }
+      }
+      throw internal(`Extraction failed: ${err.message}`);
+    }
+  } finally {
+    activeRestores.delete(serverId);
   }
 }
 

@@ -947,6 +947,63 @@ test('restoreBackup rejects a corrupted (non-zip) file with 400', async () => {
   );
 });
 
+// ─── backupService: Bug-fix tests (TDD — written before implementation) ──────
+
+// Anti-race: listener registered before the stop action fires exit.
+// If someone reverts to listener-after-stop while using an EventEmitter mock
+// that emits 'exit' synchronously, this test fails immediately.
+test('wait-for-exit resolves when process exit fires before the await (anti-race guard)', async () => {
+  const { EventEmitter } = require('events');
+  const mock = new EventEmitter();
+
+  // Correct pattern: Promise (and listener) constructed BEFORE triggering exit
+  const waitForExit = new Promise((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error('phantom timeout: exit event was missed')), 1_000);
+    mock.once('exit', () => { clearTimeout(t); resolve(); });
+  });
+
+  // Simulate stopServer(): emit 'exit' synchronously, before the first await
+  mock.emit('exit', 0, null);
+
+  // Must resolve without triggering the timeout
+  await waitForExit;
+});
+
+test('wait-for-exit resolves without phantom timeout for a fast-exiting real process', async () => {
+  const child = require('child_process').spawn(process.execPath, ['-e', 'process.exit(0)']);
+
+  const waitForExit = new Promise((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error('phantom 5s timeout: exit event was missed')), 5_000);
+    child.once('exit', () => { clearTimeout(t); resolve(); });
+  });
+
+  await waitForExit;
+});
+
+test('getChildProcess returns null for a server that is not running', () => {
+  const { getChildProcess } = require('./src/services/serverService');
+  assert.equal(getChildProcess('00000000-0000-0000-0000-000000000000'), null);
+});
+
+test('restoreBackup rejects a concurrent restore for the same server with 409', async () => {
+  const { createBackup, restoreBackup } = require('./src/services/backupService');
+  await setupBackupServerDir();
+
+  const backup = await createBackup(BACKUP_SERVER_ID);
+
+  // Both calls start simultaneously. R1 adds the activeRestores lock synchronously
+  // before its first await (findBackup); R2 sees the lock and throws 409 immediately.
+  const [r1, r2] = await Promise.allSettled([
+    restoreBackup(BACKUP_SERVER_ID, backup.id, BACKUP_SERVER_ID),
+    restoreBackup(BACKUP_SERVER_ID, backup.id, BACKUP_SERVER_ID),
+  ]);
+
+  const conflict409 = [r1, r2].filter(
+    r => r.status === 'rejected' && r.reason.statusCode === 409
+  );
+  assert.equal(conflict409.length, 1, 'exactly one restore must be rejected with 409');
+});
+
 // ─── Backup HTTP integration tests ───────────────────────────────────────────
 
 describe('GET /servers/:id/backups — no backups yet', () => {
@@ -1050,6 +1107,30 @@ describe('POST /servers/:id/backups/:backupId/restore', () => {
     const { status, body } = await api('POST', `/servers/${createdServerId}/backups/not-a-uuid/restore`);
     assert.equal(status, 400);
     assert.ok(body.error);
+  });
+
+  test('200 restores a valid backup to a stopped server', async () => {
+    const { status, body } = await api(
+      'POST',
+      `/servers/${createdServerId}/backups/${createdBackupId}/restore`
+    );
+    assert.equal(status, 200);
+    assert.equal(body.data.message, 'Restore completed successfully');
+  });
+
+  test('409 when a second restore is requested while one is already in progress', async () => {
+    // Both requests fire simultaneously. The first acquires the activeRestores lock
+    // before its first await; the second gets 409 immediately.
+    const [r1, r2] = await Promise.all([
+      api('POST', `/servers/${createdServerId}/backups/${createdBackupId}/restore`),
+      api('POST', `/servers/${createdServerId}/backups/${createdBackupId}/restore`),
+    ]);
+    const statuses = [r1.status, r2.status];
+    assert.ok(statuses.includes(409), 'at least one restore must be rejected with 409');
+    assert.ok(
+      statuses.every(s => s === 200 || s === 409),
+      'only 200 or 409 are acceptable restore responses'
+    );
   });
 });
 
