@@ -1004,6 +1004,85 @@ test('restoreBackup rejects a concurrent restore for the same server with 409', 
   assert.equal(conflict409.length, 1, 'exactly one restore must be rejected with 409');
 });
 
+// ─── backupService: F-001 / F-002 cross-lock guards (TDD RED) ────────────────
+
+test('isRestoring returns false when no restore is active', () => {
+  const { isRestoring } = require('./src/services/backupService');
+  assert.equal(isRestoring('00000000-0000-0000-0000-000000000000'), false);
+});
+
+test('isRestoring returns true while restore is pending, false after it ends', async () => {
+  const { createBackup, restoreBackup, isRestoring } = require('./src/services/backupService');
+  await setupBackupServerDir();
+  const backup = await createBackup(BACKUP_SERVER_ID);
+
+  // restoreBackup runs activeRestores.add(BACKUP_SERVER_ID) synchronously before first yield
+  const restorePromise = restoreBackup(BACKUP_SERVER_ID, backup.id, BACKUP_SERVER_ID);
+  assert.ok(isRestoring(BACKUP_SERVER_ID), 'isRestoring must be true during pending restore');
+
+  await restorePromise.catch(() => {});
+  assert.equal(isRestoring(BACKUP_SERVER_ID), false, 'isRestoring must be false after restore ends');
+});
+
+test('startServer rejects with 409 when a restore is in progress for the same server', async () => {
+  const { v4: uuidv4 } = require('uuid');
+  const serverModel = require('./src/models/serverModel');
+  const { startServer } = require('./src/services/serverService');
+  const { createBackup, restoreBackup } = require('./src/services/backupService');
+
+  // Create a real server record in DB — status defaults to 'stopped', processes Map is empty
+  const tempId = uuidv4();
+  serverModel.create({ id: tempId, name: 'tmp-start-guard', path: path.join(TEST_ROOT, 'tmp-start-guard'), port: 29996, ram: '1G' });
+
+  await setupBackupServerDir();
+  const backup = await createBackup(BACKUP_SERVER_ID);
+
+  // restoreBackup(tempId, ...) adds tempId to activeRestores synchronously before first yield
+  const restorePromise = restoreBackup(tempId, backup.id, BACKUP_SERVER_ID);
+
+  try {
+    // startServer is synchronous — must throw 409 immediately
+    assert.throws(
+      () => startServer(tempId),
+      (err) => err.statusCode === 409
+    );
+  } finally {
+    await restorePromise.catch(() => {});
+    serverModel.remove(tempId);
+  }
+});
+
+test('createBackup rejects with 409 when a restore is in progress for the same server', async () => {
+  const { createBackup, restoreBackup } = require('./src/services/backupService');
+  await setupBackupServerDir();
+  const backup = await createBackup(BACKUP_SERVER_ID);
+
+  const restorePromise = restoreBackup(BACKUP_SERVER_ID, backup.id, BACKUP_SERVER_ID);
+
+  await assert.rejects(
+    () => createBackup(BACKUP_SERVER_ID, BACKUP_SERVER_ID),
+    (err) => err.statusCode === 409
+  );
+
+  await restorePromise.catch(() => {});
+});
+
+test('restoreBackup rejects with 409 when a backup is in progress for the same server', async () => {
+  const { createBackup, restoreBackup } = require('./src/services/backupService');
+  await setupBackupServerDir();
+  const existingBackup = await createBackup(BACKUP_SERVER_ID);
+
+  // createBackup runs activeBackups.add(BACKUP_SERVER_ID) synchronously before first yield
+  const backupPromise = createBackup(BACKUP_SERVER_ID, BACKUP_SERVER_ID);
+
+  await assert.rejects(
+    () => restoreBackup(BACKUP_SERVER_ID, existingBackup.id, BACKUP_SERVER_ID),
+    (err) => err.statusCode === 409
+  );
+
+  await backupPromise.catch(() => {});
+});
+
 // ─── Backup HTTP integration tests ───────────────────────────────────────────
 
 describe('GET /servers/:id/backups — no backups yet', () => {
@@ -1130,6 +1209,24 @@ describe('POST /servers/:id/backups/:backupId/restore', () => {
     assert.ok(
       statuses.every(s => s === 200 || s === 409),
       'only 200 or 409 are acceptable restore responses'
+    );
+  });
+
+  test('409 when createBackup is called while a restore is in progress (F-002 cross-guard)', async () => {
+    // Both requests fire simultaneously. Restore acquires activeRestores before its first
+    // I/O yield; createBackup hits the activeRestores guard and gets 409.
+    const [restoreRes, backupRes] = await Promise.all([
+      api('POST', `/servers/${createdServerId}/backups/${createdBackupId}/restore`),
+      api('POST', `/servers/${createdServerId}/backups`),
+    ]);
+    const statuses = [restoreRes.status, backupRes.status];
+    assert.ok(
+      statuses.includes(409),
+      `expected at least one 409; got ${statuses.join(', ')} — cross-lock guard must block concurrent backup`
+    );
+    assert.ok(
+      statuses.every(s => s === 200 || s === 201 || s === 409),
+      'only 200, 201, or 409 are acceptable'
     );
   });
 });
