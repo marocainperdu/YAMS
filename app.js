@@ -16,8 +16,9 @@ const swaggerUi = require('swagger-ui-express');
 const { getDb } = require('./src/db');
 require('./src/services/serverService');
 
-const serverRoutes = require('./src/routes/serverRoutes');
-const fileRoutes   = require('./src/routes/fileRoutes');
+const serverRoutes  = require('./src/routes/serverRoutes');
+const fileRoutes    = require('./src/routes/fileRoutes');
+const backupRoutes  = require('./src/routes/backupRoutes');
 const metricsRoutes = require('./src/routes/metricsRoutes');
 const swaggerSpec = require('./src/swagger');
 const { createWsServer } = require('./src/websocket/wsServer');
@@ -43,6 +44,7 @@ app.use((req, _res, next) => {
 
 app.use('/servers', serverRoutes);
 app.use('/servers/:id/files', fileRoutes);
+app.use('/servers/:id/backups', backupRoutes);
 app.use('/metrics', metricsRoutes);
 app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 
@@ -109,6 +111,11 @@ const server = app.listen(PORT, () => {
   console.log('  POST   /servers/:id/files/mkdir');
   console.log('  PUT    /servers/:id/files/rename');
   console.log('  DELETE /servers/:id/files');
+  console.log('  POST   /servers/:id/backups');
+  console.log('  GET    /servers/:id/backups');
+  console.log('  GET    /servers/:id/backups/:backupId/download');
+  console.log('  DELETE /servers/:id/backups/:backupId');
+  console.log('  POST   /servers/:id/backups/:backupId/restore');
   console.log('  GET    /metrics');
   console.log(`  WS     ws://localhost:${PORT}/ws`);
   console.log(`  Docs   http://localhost:${PORT}/api-docs`);
