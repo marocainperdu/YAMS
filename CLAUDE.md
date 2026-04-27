@@ -10,6 +10,19 @@ Entries are added chronologically, newest at the top.
 
 ## Changelog
 
+### [2026-04-27 00:00] FIX: Worlds Backend post-implementation corrections
+- **`setActiveWorld` guard**: if the target directory already exists, it must have at least one Minecraft marker (`level.dat`, `region/`, etc.); a non-existent target is still allowed (Minecraft creates it on next start) — fixes false positive that accepted `plugins/`, `config/`, etc. as valid targets
+- **Export stream error**: replaced `res.socket.destroy()` with `res.destroy()` — cleaner abstraction that goes through the stream lifecycle rather than bypassing it
+- **Rapport**: clarified `POST /active` two-rule behavior, added explicit note that no synthetic World object is ever injected when `level-name` points to an absent/invalid directory, added "Export ZIP : gestion des erreurs stream" subsection
+
+### [2026-04-26 20:00] FEAT: Worlds Backend module (6 endpoints)
+- **`src/services/worldService.js`** (595 lines): all business logic — world detection via Minecraft markers (`level.dat`, `region/`, `data/`, `DIM-1/`, `DIM1/`), FIFO mutex per server, async size cache with TTL + in-flight deduplication, `server.properties` parsing (split on first `=`, trim key, raw value), ZIP import (flat + wrapped structures, zip-slip guard, atomic rename), streaming ZIP export
+- **`src/controllers/worldController.js`** (60 lines): thin HTTP layer, all errors forwarded via `next(err)`
+- **`src/routes/worldRoutes.js`** (16 lines): `Router({ mergeParams: true })`; `/:name/export` registered before `/:name` to avoid Express routing conflict
+- **`src/utils/errors.js`**: added optional `code` param to all factory functions; new `tooLarge(413)` factory
+- **`app.js`**: mounts `worldRoutes` at `/servers/:id/worlds`; error handler includes `code` field when set (backward-compatible); banner updated with 6 new endpoints
+- Endpoints: `GET /worlds`, `GET /worlds/:name`, `POST /worlds/active`, `DELETE /worlds/:name`, `POST /worlds/import`, `GET /worlds/:name/export`
+
 ### [2026-04-10 01:00] REFACTOR: Advanced production-grade improvements (Step 2 final)
 - **Full event-driven architecture**: All major events now emit via `streamEmitter` (log, status, error, pending_timeout) — enables future features without coupling
 - **Crash classification** (PRODUCTION FEATURE): Exit handler now distinguishes between `normal` stop (code 0), `crashed` (unexpected code/signal), and `startup` failures — clients receive appropriate state in status messages
