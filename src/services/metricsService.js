@@ -3,7 +3,6 @@
 const fs = require('fs');
 const fsp = require('fs/promises');
 const path = require('path');
-const os = require('os');
 
 const serverModel = require('../models/serverModel');
 
@@ -63,9 +62,9 @@ const DISK_CACHE_TTL_MS     = 60_000;  // Disk scan TTL
 // Paper/Spigot: asterisk is optional (added when TPS is capped at 20)
 const TPS_RE     = /TPS from last 1m, 5m, 15m: \*?([\d.]+), \*?([\d.]+), \*?([\d.]+)/;
 const JOIN_RE_1  = /\w+\[.+\] logged in with entity id/;
-const JOIN_RE_2  = /\w+ joined the game/;
-const LEAVE_RE_1 = /\w+ left the game/;
-const LEAVE_RE_2 = /\w+ lost connection/;
+const JOIN_RE_2  = /\]: \w+ joined the game/;
+const LEAVE_RE_1 = /\]: \w+ left the game/;
+const LEAVE_RE_2 = /\]: \w+ lost connection/;
 const LIST_RE    = /There are (\d+) of a max of (\d+) players online/;
 const DONE_RE    = /Done \([\d.]+s\)!/;
 

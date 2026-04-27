@@ -7,9 +7,6 @@ const os = require('os');
 const fs = require('fs');
 const fsp = require('fs/promises');
 
-// ─── We require the service AFTER writing it in Task 2.
-// For now, keep this file incomplete (it will fail to require).
-// DO NOT run until Task 2 is done.
 
 const svc = require('../src/services/metricsService');
 
