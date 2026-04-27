@@ -17,19 +17,28 @@ class AppError extends Error {
 
 // --- Factory functions used throughout the service layer ---
 
+function _make(msg, statusCode, code) {
+  const e = new AppError(msg, statusCode);
+  if (code) e.code = code;
+  return e;
+}
+
 /** 400 Bad Request */
-const badRequest = (msg) => new AppError(msg || 'Bad request', 400);
+const badRequest = (msg, code) => _make(msg || 'Bad request', 400, code);
 
 /** 404 Not Found */
-const notFound = (msg) => new AppError(msg || 'Not found', 404);
+const notFound = (msg, code) => _make(msg || 'Not found', 404, code);
 
 /** 409 Conflict */
-const conflict = (msg) => new AppError(msg || 'Conflict', 409);
+const conflict = (msg, code) => _make(msg || 'Conflict', 409, code);
 
 /** 403 Forbidden */
-const forbidden = (msg) => new AppError(msg || 'Forbidden', 403);
+const forbidden = (msg, code) => _make(msg || 'Forbidden', 403, code);
+
+/** 413 Payload Too Large */
+const tooLarge = (msg, code) => _make(msg || 'Payload too large', 413, code);
 
 /** 500 Internal Server Error (operational) */
-const internal = (msg) => new AppError(msg || 'Internal server error', 500);
+const internal = (msg, code) => _make(msg || 'Internal server error', 500, code);
 
-module.exports = { AppError, badRequest, notFound, conflict, forbidden, internal };
+module.exports = { AppError, badRequest, notFound, conflict, forbidden, tooLarge, internal };
