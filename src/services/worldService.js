@@ -451,12 +451,19 @@ async function getWorld(serverPath, name) {
 
 async function setActiveWorld(serverId, serverPath, name) {
   validateName(name);
-  resolveWorldPath(serverPath, name); // confinement check
+  const worldPath = resolveWorldPath(serverPath, name);
 
   const serverModel = require('../models/serverModel');
   const server = serverModel.findById(serverId);
   if (!server) throw notFound('Server not found', 'SERVER_NOT_FOUND');
   if (server.status === 'running') throw conflict('Server is running', 'SERVER_RUNNING');
+
+  // A non-existent target is allowed — Minecraft creates it on next start.
+  // An existing directory without Minecraft markers is rejected.
+  const exists = await fsp.access(worldPath).then(() => true).catch(() => false);
+  if (exists && !(await isValidWorld(serverPath, name))) {
+    throw badRequest('Target directory exists but is not a valid Minecraft world', 'INVALID_WORLD');
+  }
 
   return withMutex(serverId, async () => {
     await writeLevelName(serverPath, name);
@@ -574,8 +581,8 @@ async function exportWorld(serverPath, name, res) {
     archive.on('error', err => {
       console.error(`[YAMS] World export stream error (${name}):`, err);
       // Headers already sent — cannot write a JSON error body.
-      // Destroy the socket immediately; the client receives an abrupt close.
-      if (res.socket && !res.socket.destroyed) res.socket.destroy();
+      // Destroy the response stream; the client receives an abrupt close.
+      res.destroy();
       reject(err);
     });
 
