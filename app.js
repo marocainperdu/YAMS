@@ -110,6 +110,7 @@ const server = app.listen(PORT, () => {
   console.log('  GET    /servers/:id');
   console.log('  POST   /servers/:id/start');
   console.log('  POST   /servers/:id/stop');
+  console.log('  GET    /servers/:id/metrics');
   console.log('  GET    /servers/:id/files');
   console.log('  GET    /servers/:id/files/download?path=');
   console.log('  POST   /servers/:id/files/upload');

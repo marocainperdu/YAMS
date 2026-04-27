@@ -3,6 +3,9 @@
 const metricsService = require('../services/metricsService');
 const { notFound } = require('../utils/errors');
 
+/**
+ * GET /servers/:id/metrics
+ */
 async function getOne(req, res, next) {
   try {
     const metrics = await metricsService.getServerMetrics(req.params.id);
