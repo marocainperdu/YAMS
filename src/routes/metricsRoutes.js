@@ -3,6 +3,7 @@
 const { Router } = require('express');
 const { getObservability } = require('../utils/observability');
 const { getMetricsSnapshot } = require('../services/serverService');
+const metricsController = require('../controllers/metricsController');
 
 const router = Router();
 
@@ -85,5 +86,8 @@ router.get('/', (req, res) => {
     res.status(500).json({ error: 'Failed to collect metrics' });
   }
 });
+
+// GET /metrics/:id — per-server metrics (TPS, CPU, RAM, players, disk)
+router.get('/:id', metricsController.getOne);
 
 module.exports = router;
