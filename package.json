@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node --disable-warning=ExperimentalWarning app.js",
     "dev": "node --watch --disable-warning=ExperimentalWarning app.js",
-    "test": "node --disable-warning=ExperimentalWarning --test test.js"
+    "test": "node --disable-warning=ExperimentalWarning --test test.js tests/worlds.test.js"
   },
   "dependencies": {
     "archiver": "^7.0.1",
