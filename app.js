@@ -15,6 +15,7 @@ const swaggerUi = require('swagger-ui-express');
 // stale 'running' status from a previous session that crashed.
 const { getDb } = require('./src/db');
 require('./src/services/serverService');
+require('./src/services/metricsService').init();
 
 const serverRoutes  = require('./src/routes/serverRoutes');
 const fileRoutes    = require('./src/routes/fileRoutes');

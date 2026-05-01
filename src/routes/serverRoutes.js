@@ -1,7 +1,8 @@
 'use strict';
 
 const { Router } = require('express');
-const controller = require('../controllers/serverController');
+const controller        = require('../controllers/serverController');
+const metricsController = require('../controllers/metricsController');
 
 const router = Router();
 
@@ -13,5 +14,8 @@ router.get('/',   controller.list);     // GET  /servers       — list all serv
 router.get('/:id',        controller.getOne);  // GET  /servers/:id       — get one server
 router.post('/:id/start', controller.start);   // POST /servers/:id/start — start a server
 router.post('/:id/stop',  controller.stop);    // POST /servers/:id/stop  — stop a server
+
+// Per-server metrics
+router.get('/:id/metrics', metricsController.getOne);  // GET /servers/:id/metrics
 
 module.exports = router;
