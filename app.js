@@ -19,6 +19,7 @@ require('./src/services/serverService');
 const serverRoutes  = require('./src/routes/serverRoutes');
 const fileRoutes    = require('./src/routes/fileRoutes');
 const backupRoutes  = require('./src/routes/backupRoutes');
+const worldRoutes   = require('./src/routes/worldRoutes');
 const metricsRoutes = require('./src/routes/metricsRoutes');
 const swaggerSpec = require('./src/swagger');
 const { createWsServer } = require('./src/websocket/wsServer');
@@ -45,6 +46,7 @@ app.use((req, _res, next) => {
 app.use('/servers', serverRoutes);
 app.use('/servers/:id/files', fileRoutes);
 app.use('/servers/:id/backups', backupRoutes);
+app.use('/servers/:id/worlds', worldRoutes);
 app.use('/metrics', metricsRoutes);
 app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 
@@ -81,7 +83,9 @@ app.use((_req, res) => {
  */
 app.use((err, _req, res, _next) => {
   if (err.isOperational) {
-    return res.status(err.statusCode).json({ error: err.message });
+    const body = { error: err.message };
+    if (err.code) body.code = err.code;
+    return res.status(err.statusCode).json(body);
   }
 
   console.error('[YAMS] Unexpected error:', err);
@@ -116,6 +120,12 @@ const server = app.listen(PORT, () => {
   console.log('  GET    /servers/:id/backups/:backupId/download');
   console.log('  DELETE /servers/:id/backups/:backupId');
   console.log('  POST   /servers/:id/backups/:backupId/restore');
+  console.log('  GET    /servers/:id/worlds');
+  console.log('  GET    /servers/:id/worlds/:name');
+  console.log('  POST   /servers/:id/worlds/active');
+  console.log('  DELETE /servers/:id/worlds/:name');
+  console.log('  POST   /servers/:id/worlds/import');
+  console.log('  GET    /servers/:id/worlds/:name/export');
   console.log('  GET    /metrics');
   console.log(`  WS     ws://localhost:${PORT}/ws`);
   console.log(`  Docs   http://localhost:${PORT}/api-docs`);
