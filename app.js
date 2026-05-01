@@ -49,6 +49,15 @@ app.use('/servers/:id/files', fileRoutes);
 app.use('/servers/:id/backups', backupRoutes);
 app.use('/servers/:id/worlds', worldRoutes);
 app.use('/metrics', metricsRoutes);
+
+// /api/* mirrors — the built frontend uses an /api prefix (Vite dev proxy strips
+// it in dev mode, but Express must handle it directly when serving the built dist).
+app.use('/api/servers', serverRoutes);
+app.use('/api/servers/:id/files', fileRoutes);
+app.use('/api/servers/:id/backups', backupRoutes);
+app.use('/api/servers/:id/worlds', worldRoutes);
+app.use('/api/metrics', metricsRoutes);
+
 app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 
 // ---------------------------------------------------------------------------
