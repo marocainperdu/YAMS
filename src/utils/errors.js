@@ -32,6 +32,9 @@ const notFound = (msg, code) => _make(msg || 'Not found', 404, code);
 /** 409 Conflict */
 const conflict = (msg, code) => _make(msg || 'Conflict', 409, code);
 
+/** 401 Unauthorized */
+const unauthorized = (msg, code) => _make(msg || 'Unauthorized', 401, code);
+
 /** 403 Forbidden */
 const forbidden = (msg, code) => _make(msg || 'Forbidden', 403, code);
 
@@ -41,4 +44,4 @@ const tooLarge = (msg, code) => _make(msg || 'Payload too large', 413, code);
 /** 500 Internal Server Error (operational) */
 const internal = (msg, code) => _make(msg || 'Internal server error', 500, code);
 
-module.exports = { AppError, badRequest, notFound, conflict, forbidden, tooLarge, internal };
+module.exports = { AppError, badRequest, notFound, unauthorized, conflict, forbidden, tooLarge, internal };
