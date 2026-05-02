@@ -1,23 +1,13 @@
 import useDashboard from '../hooks/useDashboard'
-import MetricCard, { MetricCardSkeleton } from '../components/MetricCard'
 import ServerTable, { ServerTableSkeleton } from '../components/ServerTable'
 import SystemPanel from '../components/SystemPanel'
 import ActivityFeed from '../components/ActivityFeed'
 import { C } from '../styles/tokens'
 
-function buildCards(servers, clients, backpressure) {
-  return [
-    { label: 'Total Servers',    value: servers.total,                accent: C.text },
-    { label: 'Running',          value: servers.running,              accent: C.green },
-    { label: 'Active Clients',   value: clients.active,               accent: C.blue },
-    { label: 'Pending',          value: clients.pending,              accent: clients.pending > 0 ? C.amber : C.dim },
-    { label: 'Dropped Messages', value: backpressure.droppedMessages, accent: backpressure.droppedMessages > 0 ? C.red : C.dim },
-  ]
-}
+
 
 export default function Dashboard() {
   const { data, loading, error, lastFetched } = useDashboard()
-  const cards = buildCards(data.servers, data.clients, data.backpressure)
 
   return (
     <div style={{
@@ -44,24 +34,6 @@ export default function Dashboard() {
         Dashboard
       </h1>
 
-      {/* Metric cards */}
-      <div style={{ display: 'flex', gap: 12 }}>
-        {loading
-          ? Array.from({ length: 5 }).map((_, i) => (
-              <MetricCardSkeleton key={i} />
-            ))
-          : cards.map((card, i) => (
-              <MetricCard
-                key={card.label}
-                label={card.label}
-                value={card.value}
-                accent={card.accent}
-                style={{ animationDelay: `${i * 60}ms`, opacity: 0, animationFillMode: 'forwards' }}
-                className="animate-fade-in-up"
-              />
-            ))
-        }
-      </div>
 
       {/* Main grid */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 220px', gap: 16 }}>
