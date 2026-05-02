@@ -22,6 +22,9 @@ function getStmts() {
       updatePassword: db.prepare(
         `UPDATE users SET password_hash = ?, must_change_password = 0 WHERE id = ?`
       ),
+      updateProfile: db.prepare(
+        `UPDATE users SET email = ?, username = ? WHERE id = ?`
+      ),
     };
   }
   return stmts;
@@ -36,6 +39,10 @@ function create({ email, passwordHash, role = 'user', mustChangePassword = false
 
 function updatePassword(id, newHash) {
   getStmts().updatePassword.run(newHash, id);
+}
+
+function updateProfile(id, { email, username }) {
+  getStmts().updateProfile.run(email, username ?? null, id);
 }
 
 function findAll() {
@@ -54,4 +61,4 @@ function count() {
   return getStmts().count.get().c;
 }
 
-module.exports = { create, findAll, findByEmail, findById, count, updatePassword };
+module.exports = { create, findAll, findByEmail, findById, count, updatePassword, updateProfile };

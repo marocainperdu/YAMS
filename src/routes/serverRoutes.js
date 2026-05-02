@@ -3,6 +3,7 @@
 const { Router }                  = require('express');
 const controller                  = require('../controllers/serverController');
 const metricsController           = require('../controllers/metricsController');
+const jarController               = require('../controllers/jarController');
 const { authMiddleware }          = require('../middleware/authMiddleware');
 const { requireServerPermission } = require('../middleware/permissionMiddleware');
 
@@ -15,9 +16,11 @@ router.post('/', controller.create);
 router.get('/', authMiddleware, controller.list);
 
 // Per-server operations — authentication + explicit permission
-router.get('/:id',         authMiddleware, requireServerPermission('read'),    controller.getOne);
-router.post('/:id/start',  authMiddleware, requireServerPermission('control'), controller.start);
-router.post('/:id/stop',   authMiddleware, requireServerPermission('control'), controller.stop);
-router.get('/:id/metrics', authMiddleware, requireServerPermission('read'),    metricsController.getOne);
+router.get('/:id',              authMiddleware, requireServerPermission('read'),    controller.getOne);
+router.post('/:id/start',       authMiddleware, requireServerPermission('control'), controller.start);
+router.post('/:id/stop',        authMiddleware, requireServerPermission('control'), controller.stop);
+router.get('/:id/metrics',      authMiddleware, requireServerPermission('read'),    metricsController.getOne);
+// No auth guard — mirrors POST /servers (no ownership model yet)
+router.post('/:id/download-jar', jarController.downloadJar);
 
 module.exports = router;
