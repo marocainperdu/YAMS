@@ -107,10 +107,11 @@ function verifyCode(user, code) {
   const secret = decryptSecret(user.totp_secret);
   if (!secret) return false;
 
-  if (user.totp_last_code && code === user.totp_last_code) return false;
+  const codeHash = crypto.createHash('sha256').update(code).digest('hex');
+  if (user.totp_last_code && codeHash === user.totp_last_code) return false;
 
   const valid = verifySync({ token: code, secret }).valid;
-  if (valid) userModel.updateTotpLastCode(user.id, code);
+  if (valid) userModel.updateTotpLastCode(user.id, codeHash);
   return valid;
 }
 
