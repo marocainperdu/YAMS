@@ -14,7 +14,7 @@ function getStmts() {
          VALUES (?, ?, ?, ?, ?, ?)`
       ),
       findAll: db.prepare(
-        `SELECT id, email, role, created_at FROM users ORDER BY created_at DESC`
+        `SELECT id, email, username, role, created_at FROM users ORDER BY created_at DESC`
       ),
       findByEmail: db.prepare(`SELECT * FROM users WHERE email = ?`),
       findById:    db.prepare(`SELECT * FROM users WHERE id = ?`),

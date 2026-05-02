@@ -34,21 +34,10 @@ function RoleBadge({ role }) {
   )
 }
 
-function StatusBadge({ status }) {
-  const map = { active: C.green, invited: C.amber, suspended: C.red }
-  const color = map[status] || C.dim
-  return (
-    <span style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, color }}>
-      <span style={{ width: 6, height: 6, borderRadius: '50%', background: color, display: 'inline-block' }} />
-      {status.charAt(0).toUpperCase() + status.slice(1)}
-    </span>
-  )
-}
-
 function UserAvatar({ user, size = 32 }) {
   return (
     <div style={{ width: size, height: size, borderRadius: '50%', flexShrink: 0, background: C.surface2, border: `1px solid ${C.border}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: Math.round(size * 0.38), fontWeight: 600, color: C.muted }}>
-      {user.avatar || user.name[0]}
+      {user.avatar}
     </div>
   )
 }
@@ -187,7 +176,7 @@ function EditRoleModal({ user, onClose, onSave }) {
         <div style={{ padding: '18px 24px', borderBottom: `1px solid ${C.border}`, display: 'flex', alignItems: 'center', gap: 12 }}>
           <UserAvatar user={user} size={36} />
           <div>
-            <div style={{ fontSize: 14, fontWeight: 600, color: C.text }}>{user.name}</div>
+            <div style={{ fontSize: 14, fontWeight: 600, color: C.text }}>{user.email}</div>
             <div style={{ fontSize: 12, color: C.muted }}>{user.email}</div>
           </div>
           <button onClick={onClose} style={{ marginLeft: 'auto', background: 'none', border: 'none', color: C.muted, fontSize: 18, cursor: 'pointer' }}>×</button>
@@ -227,12 +216,9 @@ export default function UsersPage({ currentUser }) {
   function adaptUser(u) {
     return {
       id: u.id,
-      name: u.email.split('@')[0],
+      username: u.username || null,
       email: u.email,
       role: u.role,
-      status: 'active',
-      joined: u.created_at ? new Date(u.created_at).toISOString().slice(0, 10) : '—',
-      last: '—',
       avatar: u.email[0].toUpperCase(),
     }
   }
@@ -248,19 +234,14 @@ export default function UsersPage({ currentUser }) {
     setUsers(u => u.map(usr => usr.id === id ? { ...usr, role } : usr))
   }
 
-  function handleSuspend(id) {
-    showNotice('Suspend/restore is not implemented on the backend (local display only).')
-    setUsers(u => u.map(usr => usr.id === id ? { ...usr, status: usr.status === 'suspended' ? 'active' : 'suspended' } : usr))
-  }
-
   function handleRemove(id) {
     if (!confirm('Remove this user? (Note: not implemented on backend — local display only)')) return
     setUsers(u => u.filter(usr => usr.id !== id))
   }
 
   const filtered = users.filter(u =>
-    u.name.toLowerCase().includes(search.toLowerCase()) ||
-    u.email.toLowerCase().includes(search.toLowerCase())
+    u.email.toLowerCase().includes(search.toLowerCase()) ||
+    (u.username && u.username.toLowerCase().includes(search.toLowerCase()))
   )
 
   return (
@@ -293,7 +274,7 @@ export default function UsersPage({ currentUser }) {
 
       <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, overflow: 'hidden' }}>
         <div style={{ display: 'flex', padding: '10px 16px', background: C.surface2, borderBottom: `1px solid ${C.border}` }}>
-          {[['User', '35%'], ['Role', '18%'], ['Status', '15%'], ['Last active', '17%'], ['', '15%']].map(([label, w]) => (
+          {[['User', '55%'], ['Role', '25%'], ['', '20%']].map(([label, w]) => (
             <div key={label} style={{ width: w, fontSize: 11, fontWeight: 500, color: C.muted, textTransform: 'uppercase', letterSpacing: '0.06em' }}>{label}</div>
           ))}
         </div>
@@ -312,26 +293,19 @@ export default function UsersPage({ currentUser }) {
                   onMouseLeave={() => setHov(null)}
                   style={{ display: 'flex', alignItems: 'center', padding: '12px 16px', borderBottom: i < filtered.length - 1 ? `1px solid ${C.borderLight}` : 'none', background: isHov ? C.surface2 : 'transparent', transition: 'background 150ms' }}
                 >
-                  <div style={{ width: '35%', display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <div style={{ width: '55%', display: 'flex', alignItems: 'center', gap: 10 }}>
                     <UserAvatar user={user} />
                     <div>
                       <div style={{ fontSize: 13, fontWeight: 500, color: C.text, display: 'flex', alignItems: 'center', gap: 6 }}>
-                        {user.name}
+                        {user.username || <span style={{ color: C.dim, fontStyle: 'italic' }}>no username</span>}
                         {isMe && <span style={{ fontSize: 9, color: C.blue, fontWeight: 600, background: `${C.blue}18`, border: `1px solid ${C.blue}44`, borderRadius: 3, padding: '1px 5px', textTransform: 'uppercase' }}>you</span>}
                       </div>
                       <div style={{ fontSize: 11, color: C.dim, marginTop: 1 }}>{user.email}</div>
                     </div>
                   </div>
-                  <div style={{ width: '18%' }}><RoleBadge role={user.role} /></div>
-                  <div style={{ width: '15%' }}><StatusBadge status={user.status} /></div>
-                  <div style={{ width: '17%', fontSize: 12, color: C.dim }}>{user.last}</div>
-                  <div style={{ width: '15%', display: 'flex', gap: 6, justifyContent: 'flex-end', opacity: isHov ? 1 : 0, transition: 'opacity 150ms' }}>
+                  <div style={{ width: '25%' }}><RoleBadge role={user.role} /></div>
+                  <div style={{ width: '20%', display: 'flex', gap: 6, justifyContent: 'flex-end', opacity: isHov ? 1 : 0, transition: 'opacity 150ms' }}>
                     <button onClick={() => setEditUser(user)} style={{ fontSize: 11, padding: '3px 8px', borderRadius: 4, border: `1px solid ${C.border}`, background: 'transparent', color: C.muted, cursor: 'pointer' }}>Edit</button>
-                    {!isMe && (
-                      <button onClick={() => handleSuspend(user.id)} style={{ fontSize: 11, padding: '3px 8px', borderRadius: 4, border: `1px solid ${user.status === 'suspended' ? C.green + '44' : C.amber + '44'}`, background: 'transparent', color: user.status === 'suspended' ? C.green : C.amber, cursor: 'pointer' }}>
-                        {user.status === 'suspended' ? 'Restore' : 'Suspend'}
-                      </button>
-                    )}
                     {!isMe && (
                       <button onClick={() => handleRemove(user.id)} style={{ fontSize: 11, padding: '3px 8px', borderRadius: 4, border: `1px solid ${C.red}44`, background: 'transparent', color: C.red, cursor: 'pointer' }}>Remove</button>
                     )}
