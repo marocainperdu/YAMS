@@ -275,6 +275,14 @@ function TwoFATab({ currentUser }) {
   const [disablePassword, setDisablePassword] = React.useState('')  // M2
   const [error, setError] = React.useState(null)
   const [loading, setLoading] = React.useState(false)
+  const [secretCopied, setSecretCopied] = React.useState(false)
+
+  function handleCopySecret() {
+    navigator.clipboard.writeText(setupData.secret).then(() => {
+      setSecretCopied(true)
+      setTimeout(() => setSecretCopied(false), 2000)
+    })
+  }
 
   React.useEffect(() => {
     apiFetch('/auth/me').then(res => {
@@ -387,10 +395,16 @@ function TwoFATab({ currentUser }) {
           <div style={{ display: 'flex', gap: 20, alignItems: 'flex-start', flexWrap: 'wrap' }}>
             <img src={qrUrl} alt="TOTP QR" style={{ width: 180, height: 180, borderRadius: 8, background: '#fff', padding: 4 }} />
             <div style={{ flex: 1, minWidth: 200 }}>
-              <div style={{ fontSize: 12, color: C.muted, marginBottom: 8 }}>Or enter this key manually in your app:</div>
-              <div style={{ fontFamily: 'monospace', fontSize: 13, color: C.text, background: C.bg, border: `1px solid ${C.border}`, borderRadius: 6, padding: '8px 12px', letterSpacing: '0.1em', wordBreak: 'break-all' }}>
-                {setupData.secret}
-              </div>
+              <div style={{ fontSize: 12, color: C.muted, marginBottom: 8 }}>Can't scan? Copy the secret key and enter it manually:</div>
+              <button type="button" onClick={handleCopySecret} style={{
+                padding: '8px 16px', borderRadius: 6, border: `1px solid ${C.border}`,
+                background: secretCopied ? `${C.green}18` : C.bg,
+                color: secretCopied ? C.green : C.muted,
+                fontSize: 12, fontWeight: 500, cursor: 'pointer',
+                display: 'flex', alignItems: 'center', gap: 6,
+              }}>
+                {secretCopied ? '✓ Copied' : 'Copy secret key'}
+              </button>
             </div>
           </div>
         </div>
