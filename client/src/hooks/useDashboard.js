@@ -1,63 +1,59 @@
-import { useState, useEffect, useRef } from 'react';
-
-const DEFAULT_DATA = {
-  uptime: 0,
-  servers: { total: 0, running: 0, stopped: 0, crashed: 0, list: [] },
-  clients: { active: 0, pending: 0 },
-  backpressure: { droppedMessages: 0 },
-  recentLogs: [],
-};
-
-const POLL_INTERVAL = 3000;
+import { useEffect, useState } from 'react'
+import { apiFetch } from '../lib/yamsShared'
 
 export default function useDashboard() {
-  const [data, setData] = useState(DEFAULT_DATA);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [lastFetched, setLastFetched] = useState(null);
-  // Keep a stable ref to the last serialised response so we can skip
-  // setState when the backend returns identical data — avoids re-renders
-  // on every poll tick even when nothing changed.
-  const lastJsonRef = useRef(null);
+  const [data, setData] = useState(null)
+  const [error, setError] = useState(null)
+  const [lastUpdated, setLastUpdated] = useState(Date.now())
+
+  async function fetchMetrics() {
+    try {
+      const metrics = await apiFetch('/metrics')
+      setData({
+        metrics: {
+          totalServers: metrics.servers.total,
+          runningServers: metrics.servers.running,
+          activeClients: metrics.clients.active,
+          pendingClients: metrics.clients.pending,
+          droppedMessages: metrics.backpressure.droppedMessages,
+        },
+        servers: (metrics.servers.list || []).map(s => ({
+          id: s.id,
+          name: s.name,
+          status: s.status,
+          port: s.port,
+          clients: s.clients || 0,
+          maxClients: 50,
+          uptime: s.uptime || 0,
+        })),
+        systemUptime: metrics.uptime || 0,
+        systemHealth: 0.95,
+        logs: (metrics.recentLogs || []).map((l, i) => ({
+          id: l.id || i,
+          ts: l.timestamp || Date.now(),
+          msg: l.serverName ? `[${l.serverName}] ${l.data || ''}` : (l.data || ''),
+        })),
+      })
+      setLastUpdated(Date.now())
+      setError(null)
+    } catch {
+      setError('Connection lost — retrying…')
+    }
+  }
 
   useEffect(() => {
-    let cancelled = false;
+    fetchMetrics()
+    const id = setInterval(fetchMetrics, 3000)
+    return () => clearInterval(id)
+  }, [])
 
-    async function fetchMetrics() {
-      try {
-        const res = await fetch('/api/metrics');
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const json = await res.json();
+  const defaultData = {
+    metrics: { totalServers: 0, runningServers: 0, activeClients: 0, pendingClients: 0, droppedMessages: 0 },
+    servers: [],
+    systemUptime: 0,
+    systemHealth: 1,
+    logs: [],
+  }
 
-        if (cancelled) return;
-
-        // Shallow change detection via serialisation — cheap for this payload size.
-        const serialised = JSON.stringify(json);
-        if (serialised !== lastJsonRef.current) {
-          lastJsonRef.current = serialised;
-          setData(json);
-        }
-
-        setError(null);
-        setLoading(false);
-        setLastFetched(Date.now());
-      } catch (err) {
-        if (cancelled) return;
-        // Keep stale data visible; only surface the error.
-        setError(err.message);
-        setLoading(false);
-      }
-    }
-
-    // Fetch immediately, then on every interval tick.
-    fetchMetrics();
-    const interval = setInterval(fetchMetrics, POLL_INTERVAL);
-
-    return () => {
-      cancelled = true;
-      clearInterval(interval);
-    };
-  }, []); // empty deps — single interval, never recreated
-
-  return { data, loading, error, lastFetched };
+  return { data: data || defaultData, error, lastUpdated }
 }

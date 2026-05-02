@@ -2,6 +2,9 @@
 node_modules/
 client/node_modules/
 
+# Build artefacts — rebuilt inside the image
+client/dist/
+
 # Runtime data — provided by Docker volumes, not baked into the image
 servers/
 yams.db
