@@ -34,7 +34,16 @@ const PORT = process.env.PORT || 3000;
 // Middleware
 // ---------------------------------------------------------------------------
 
-app.use(express.json());
+// M1 — limit JSON body size to prevent memory exhaustion
+app.use(express.json({ limit: '10kb' }));
+
+// M4 — minimal security headers
+app.use((_req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  next();
+});
 
 app.use((req, _res, next) => {
   console.log(`[YAMS] ${req.method} ${req.path}`);

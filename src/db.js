@@ -64,6 +64,9 @@ function migrate(db) {
   // Idempotent: silently ignored if column already exists
   try { db.exec(`ALTER TABLE users ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 0`); } catch {}
   try { db.exec(`ALTER TABLE users ADD COLUMN username TEXT`); } catch {}
+  try { db.exec(`ALTER TABLE users ADD COLUMN totp_secret TEXT`); } catch {}
+  try { db.exec(`ALTER TABLE users ADD COLUMN totp_enabled INTEGER NOT NULL DEFAULT 0`); } catch {}
+  try { db.exec(`ALTER TABLE users ADD COLUMN totp_last_code TEXT`); } catch {} // H2: replay prevention
 }
 
 module.exports = { getDb };
