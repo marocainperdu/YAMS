@@ -5,6 +5,11 @@
 node_modules/
 .claude/
 
+# Ruflo / claude-flow
+.claude-flow/
+.swarm/
+.mcp.json
+
 # Database files
 yams.db
 yams.db-wal
