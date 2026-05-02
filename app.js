@@ -102,6 +102,7 @@ const server = app.listen(PORT, () => {
   console.log(`[YAMS] Running on http://localhost:${PORT}`);
   console.log('[YAMS] Endpoints:');
   console.log('  POST   /auth/login');
+  console.log('  PATCH  /auth/password           (auth)');
   console.log('  POST   /users                (admin)');
   console.log('  GET    /users                (admin)');
   console.log('  POST   /permissions          (admin)');
