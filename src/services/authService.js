@@ -39,6 +39,37 @@ async function login({ email, password }) {
   return { token, forcePasswordChange: user.must_change_password === 1 };
 }
 
+async function getMe(userId) {
+  const user = userModel.findById(userId);
+  if (!user) throw notFound('User not found');
+  return { id: user.id, email: user.email, username: user.username ?? null, role: user.role, created_at: user.created_at };
+}
+
+async function updateMe(userId, { username, email } = {}) {
+  const user = userModel.findById(userId);
+  if (!user) throw notFound('User not found');
+
+  let newEmail    = user.email;
+  let newUsername = user.username ?? null;
+
+  if (email !== undefined) {
+    const trimmed = String(email).toLowerCase().trim();
+    if (!EMAIL_RE.test(trimmed)) throw badRequest('A valid email is required');
+    const taken = userModel.findByEmail(trimmed);
+    if (taken && taken.id !== userId) throw conflict('Email already in use');
+    newEmail = trimmed;
+  }
+
+  if (username !== undefined) {
+    const trimmed = String(username).trim();
+    if (trimmed.length === 0 || trimmed.length > 64) throw badRequest('Username must be between 1 and 64 characters');
+    newUsername = trimmed;
+  }
+
+  userModel.updateProfile(userId, { email: newEmail, username: newUsername });
+  return { id: user.id, email: newEmail, username: newUsername, role: user.role };
+}
+
 async function changePassword(userId, { currentPassword, newPassword }) {
   if (!currentPassword)                        throw badRequest('Current password is required');
   if (!newPassword || newPassword.length < 8)  throw badRequest('New password must be at least 8 characters');
@@ -112,4 +143,4 @@ function seedAdminIfEmpty() {
   }
 }
 
-module.exports = { createUser, login, changePassword, verifyToken, seedAdminIfEmpty };
+module.exports = { createUser, login, getMe, updateMe, changePassword, verifyToken, seedAdminIfEmpty };

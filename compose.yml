@@ -10,6 +10,7 @@ services:
       - PORT=3000
       - YAMS_DB=/app/data/yams.db
       - YAMS_SERVERS_ROOT=/app/servers
+      - YAMS_AUTH_ENABLED=true
       - NODE_ENV=production
     restart: unless-stopped
 

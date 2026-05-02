@@ -3,6 +3,26 @@
 const authService = require('../services/authService');
 const { badRequest } = require('../utils/errors');
 
+async function getMe(req, res, next) {
+  try {
+    if (!req.user) return next(badRequest('Auth not enabled'));
+    const user = await authService.getMe(req.user.userId);
+    res.json({ data: user });
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function updateMe(req, res, next) {
+  try {
+    if (!req.user) return next(badRequest('Auth not enabled'));
+    const user = await authService.updateMe(req.user.userId, req.body);
+    res.json({ data: user });
+  } catch (err) {
+    next(err);
+  }
+}
+
 async function login(req, res, next) {
   try {
     const result = await authService.login(req.body);
@@ -22,4 +42,4 @@ async function changePassword(req, res, next) {
   }
 }
 
-module.exports = { login, changePassword };
+module.exports = { login, getMe, updateMe, changePassword };

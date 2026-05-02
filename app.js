@@ -107,6 +107,7 @@ const server = app.listen(PORT, () => {
   console.log('  GET    /users                (admin)');
   console.log('  POST   /permissions          (admin)');
   console.log('  POST   /servers');
+  console.log('  POST   /servers/:id/download-jar');
   console.log('  GET    /servers              (auth)');
   console.log('  GET    /servers/:id          (view)');
   console.log('  POST   /servers/:id/start    (start)');
