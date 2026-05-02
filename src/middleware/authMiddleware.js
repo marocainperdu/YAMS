@@ -1,7 +1,7 @@
 'use strict';
 
 const { verifyToken } = require('../services/authService');
-const { unauthorized } = require('../utils/errors');
+const { unauthorized, forbidden } = require('../utils/errors');
 
 // When YAMS_AUTH_ENABLED is not set the middleware is a transparent no-op so
 // that all pre-existing tests (which never send tokens) keep passing as-is.
@@ -16,6 +16,15 @@ function authMiddleware(req, _res, next) {
 
   const payload = verifyToken(header.slice(7));
   if (!payload) return next(unauthorized('Invalid or expired token', 'INVALID_TOKEN'));
+
+  // C2 — tokens with scope=change_password may only reach PATCH /auth/password
+  if (payload.scope === 'change_password') {
+    const path = req.originalUrl.split('?')[0];
+    const isPasswordRoute = req.method === 'PATCH' && /\/auth\/password$/.test(path);
+    if (!isPasswordRoute) {
+      return next(forbidden('Password change required before accessing this resource', 'FORCE_PASSWORD_CHANGE'));
+    }
+  }
 
   req.user = payload;
   next();

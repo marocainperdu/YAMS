@@ -94,8 +94,8 @@ describe('Permission system — HTTP integration', () => {
     assert.equal(loginRes.status, 200, 'admin login must succeed in before()');
     adminToken = loginRes.body.data.token;
 
-    // Create a test server (POST /servers is unprotected)
-    const srvRes = await api('POST', '/servers', { name: 'permtest', port: 25580, ram: '1G' });
+    // Create a test server as admin (POST /servers requires authentication)
+    const srvRes = await api('POST', '/servers', { name: 'permtest', port: 25580, ram: '1G' }, adminToken);
     assert.equal(srvRes.status, 201, 'server creation must succeed in before()');
     testServerId = srvRes.body.data.id;
 
