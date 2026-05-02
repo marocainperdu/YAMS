@@ -17,14 +17,13 @@ const MC_VERSIONS = [
 ]
 
 const GAMEMODES = ['survival', 'creative', 'adventure', 'spectator']
-const MEMORY_OPTIONS = ['512M', '1G', '2G', '4G', '6G', '8G']
 
 export default function CreateServerPage({ onCreated, onCancel }) {
   const [step, setStep] = React.useState(0)
   const [engine, setEngine] = React.useState('')
   const [version, setVersion] = React.useState('')
   const [settings, setSettings] = React.useState({
-    name: '', memory: '2G', port: '25565',
+    name: '', memory: '', port: '25565',
     maxPlayers: '20', gamemode: 'survival',
     motd: 'A YAMS Minecraft Server',
     onlineMode: true, pvp: true,
@@ -63,7 +62,7 @@ export default function CreateServerPage({ onCreated, onCancel }) {
         body: JSON.stringify({
           name: settings.name.trim(),
           port: parseInt(settings.port, 10),
-          ram: settings.memory,
+          ram: settings.memory ? `${settings.memory}M` : '1024M',
           engine: engine,
           version: version,
           maxPlayers: parseInt(settings.maxPlayers, 10),
@@ -86,13 +85,13 @@ export default function CreateServerPage({ onCreated, onCancel }) {
   if (creating) return <CreatingAnimation progress={progress} name={settings.name} />
 
   return (
-    <div style={{ maxWidth: 720, margin: '0 auto', padding: '32px 24px' }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 32 }}>
+    <div style={{ maxWidth: 720, margin: '0 auto', padding: '32px 24px', display: 'flex', flexDirection: 'column', height: 'calc(100vh - 48px)', boxSizing: 'border-box' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 32, flexShrink: 0 }}>
         <h1 style={{ fontSize: 20, fontWeight: 700, color: C.text, margin: 0 }}>New Server</h1>
         <button onClick={onCancel} style={{ background: 'none', border: 'none', color: C.muted, fontSize: 20, cursor: 'pointer', lineHeight: 1 }}>✕</button>
       </div>
 
-      <div style={{ display: 'flex', alignItems: 'center', marginBottom: 36 }}>
+      <div style={{ display: 'flex', alignItems: 'center', marginBottom: 36, flexShrink: 0 }}>
         {STEPS.map((label, i) => (
           <React.Fragment key={i}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -113,16 +112,18 @@ export default function CreateServerPage({ onCreated, onCancel }) {
         ))}
       </div>
 
-      {step === 0 && <StepEngine engine={engine} setEngine={setEngine} />}
-      {step === 1 && <StepVersion version={version} setVersion={setVersion} />}
-      {step === 2 && <StepSettings settings={settings} setSettings={setSettings} />}
-      {step === 3 && <StepReview engine={engine} version={version} settings={settings} />}
+      <div style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
+        {step === 0 && <StepEngine engine={engine} setEngine={setEngine} />}
+        {step === 1 && <StepVersion version={version} setVersion={setVersion} />}
+        {step === 2 && <StepSettings settings={settings} setSettings={setSettings} />}
+        {step === 3 && <StepReview engine={engine} version={version} settings={settings} />}
 
-      {error && (
-        <div style={{ marginTop: 20, background: `${C.red}12`, border: `1px solid ${C.red}44`, borderRadius: 6, padding: '10px 14px', fontSize: 12, color: C.red }}>{error}</div>
-      )}
+        {error && (
+          <div style={{ marginTop: 20, background: `${C.red}12`, border: `1px solid ${C.red}44`, borderRadius: 6, padding: '10px 14px', fontSize: 12, color: C.red }}>{error}</div>
+        )}
+      </div>
 
-      <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 32, paddingTop: 20, borderTop: `1px solid ${C.border}` }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', paddingTop: 20, marginTop: 16, borderTop: `1px solid ${C.border}`, flexShrink: 0 }}>
         <button onClick={step === 0 ? onCancel : handleBack} style={{
           padding: '9px 22px', borderRadius: 7, border: `1px solid ${C.border}`,
           background: 'none', color: C.muted, fontSize: 13, cursor: 'pointer',
@@ -194,6 +195,18 @@ function StepVersion({ version, setVersion }) {
   )
 }
 
+const settingsInp = {
+  width: '100%', background: C.surface2, border: `1px solid ${C.border}`,
+  borderRadius: 7, padding: '9px 13px', fontSize: 14, color: C.text,
+  outline: 'none', boxSizing: 'border-box',
+}
+function SettingsLabel({ children }) {
+  return <label style={{ fontSize: 12, fontWeight: 500, color: C.muted, display: 'block', marginBottom: 6 }}>{children}</label>
+}
+function SettingsRow({ children, cols = 'repeat(2, 1fr)' }) {
+  return <div style={{ display: 'grid', gridTemplateColumns: cols, gap: 16 }}>{children}</div>
+}
+
 function StepSettings({ settings, setSettings }) {
   function set(key, val) { setSettings(s => ({ ...s, [key]: val })) }
 
@@ -202,17 +215,9 @@ function StepSettings({ settings, setSettings }) {
     ? 'Name must start with a letter, use only letters, numbers, hyphens (3–32 chars).'
     : null
 
-  const inp = {
-    width: '100%', background: C.surface2, border: `1px solid ${C.border}`,
-    borderRadius: 7, padding: '9px 13px', fontSize: 14, color: C.text,
-    outline: 'none', boxSizing: 'border-box',
-  }
-  const Label = ({ children }) => (
-    <label style={{ fontSize: 12, fontWeight: 500, color: C.muted, display: 'block', marginBottom: 6 }}>{children}</label>
-  )
-  const Row = ({ children, cols = 'repeat(2, 1fr)' }) => (
-    <div style={{ display: 'grid', gridTemplateColumns: cols, gap: 16 }}>{children}</div>
-  )
+  const inp = settingsInp
+  const Label = SettingsLabel
+  const Row = SettingsRow
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
@@ -227,10 +232,11 @@ function StepSettings({ settings, setSettings }) {
 
       <Row>
         <div>
-          <Label>Memory</Label>
-          <select value={settings.memory} onChange={e => set('memory', e.target.value)} style={{ ...inp }}>
-            {MEMORY_OPTIONS.map(m => <option key={m} value={m}>{m}</option>)}
-          </select>
+          <Label>Memory (MB)</Label>
+          <input type="number" min="512" value={settings.memory} onChange={e => set('memory', e.target.value)}
+            placeholder="e.g. 1024" style={inp}
+            onFocus={e => { e.target.style.borderColor = C.blue }}
+            onBlur={e => { e.target.style.borderColor = C.border }} />
         </div>
         <div>
           <Label>Port</Label>
@@ -295,7 +301,7 @@ function StepReview({ engine, version, settings }) {
     ['Engine', engineOpt.label || engine],
     ['Version', version],
     ['Name', settings.name],
-    ['Memory', settings.memory],
+    ['Memory', settings.memory ? `${settings.memory} MB` : '1024 MB'],
     ['Port', settings.port],
     ['Max Players', settings.maxPlayers],
     ['Game mode', settings.gamemode],
