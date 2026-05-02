@@ -6,10 +6,20 @@ const jwt       = require('jsonwebtoken');
 const userModel = require('../models/userModel');
 const { badRequest, conflict, unauthorized, notFound } = require('../utils/errors');
 
-const JWT_SECRET  = process.env.JWT_SECRET || 'dev-secret';
+// C1 — Fail-fast: JWT_SECRET is mandatory when auth is enabled
+if (process.env.YAMS_AUTH_ENABLED && !process.env.JWT_SECRET) {
+  throw new Error('[YAMS] FATAL: YAMS_AUTH_ENABLED requires JWT_SECRET to be set.');
+}
+
+const JWT_SECRET  = process.env.JWT_SECRET || 'dev-secret-unused';
 const JWT_EXPIRY  = '7d';
 const SALT_ROUNDS = 10;
 const EMAIL_RE    = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+// C3 — TOTP brute-force: in-memory per-user lockout
+const totpLockouts     = new Map(); // userId -> { attempts, lockedUntil }
+const TOTP_MAX_ATTEMPTS = 5;
+const TOTP_LOCKOUT_MS   = 15 * 60 * 1000;
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
@@ -37,11 +47,35 @@ async function login({ email, password, totpCode }) {
 
   if (user.totp_enabled) {
     if (!totpCode) return { requiresTOTP: true };
+
+    // C3 — lockout check before attempting TOTP verification
+    const lockout = totpLockouts.get(user.id);
+    if (lockout && Date.now() < lockout.lockedUntil) {
+      throw unauthorized('Too many failed attempts. Try again later.');
+    }
+
     const { verifyCode } = require('./twoFAService');
-    if (!verifyCode(user, String(totpCode))) throw unauthorized('Invalid authenticator code');
+    if (!verifyCode(user, String(totpCode))) {
+      const entry = totpLockouts.get(user.id) || { attempts: 0, lockedUntil: 0 };
+      entry.attempts += 1;
+      if (entry.attempts >= TOTP_MAX_ATTEMPTS) {
+        entry.lockedUntil = Date.now() + TOTP_LOCKOUT_MS;
+      }
+      totpLockouts.set(user.id, entry);
+      throw unauthorized('Invalid authenticator code');
+    }
+
+    totpLockouts.delete(user.id);
   }
 
-  const token = jwt.sign({ userId: user.id, role: user.role }, JWT_SECRET, { expiresIn: JWT_EXPIRY });
+  // C2 — restricted scope for accounts that must change their password
+  const scope     = user.must_change_password === 1 ? 'change_password' : 'full';
+  const expiresIn = user.must_change_password === 1 ? '1h' : JWT_EXPIRY;
+  const token     = jwt.sign(
+    { userId: user.id, role: user.role, scope },
+    JWT_SECRET,
+    { expiresIn, algorithm: 'HS256' }
+  );
   return { token, forcePasswordChange: user.must_change_password === 1, username: user.username ?? null };
 }
 
@@ -90,9 +124,10 @@ async function changePassword(userId, { currentPassword, newPassword }) {
   userModel.updatePassword(userId, newHash);
 }
 
+// H4 — pin algorithm to HS256 to prevent confusion attacks
 function verifyToken(token) {
   try {
-    return jwt.verify(token, JWT_SECRET);
+    return jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'] });
   } catch {
     return null;
   }
@@ -107,7 +142,6 @@ function generateSecurePassword() {
   const symbols = '!@#$%^&*()-_=+[]{}|;:,.<>?';
   const all     = upper + lower + digits + symbols;
 
-  // Guarantee at least one from each class
   const required = [
     upper[crypto.randomInt(upper.length)],
     lower[crypto.randomInt(lower.length)],

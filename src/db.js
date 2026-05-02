@@ -66,6 +66,7 @@ function migrate(db) {
   try { db.exec(`ALTER TABLE users ADD COLUMN username TEXT`); } catch {}
   try { db.exec(`ALTER TABLE users ADD COLUMN totp_secret TEXT`); } catch {}
   try { db.exec(`ALTER TABLE users ADD COLUMN totp_enabled INTEGER NOT NULL DEFAULT 0`); } catch {}
+  try { db.exec(`ALTER TABLE users ADD COLUMN totp_last_code TEXT`); } catch {} // H2: replay prevention
 }
 
 module.exports = { getDb };

@@ -28,6 +28,9 @@ function getStmts() {
       updateTotp: db.prepare(
         `UPDATE users SET totp_secret = ?, totp_enabled = ? WHERE id = ?`
       ),
+      updateTotpLastCode: db.prepare(
+        `UPDATE users SET totp_last_code = ? WHERE id = ?`
+      ),
     };
   }
   return stmts;
@@ -68,4 +71,8 @@ function updateTotp(id, { secret, enabled }) {
   getStmts().updateTotp.run(secret ?? null, enabled ? 1 : 0, id);
 }
 
-module.exports = { create, findAll, findByEmail, findById, count, updatePassword, updateProfile, updateTotp };
+function updateTotpLastCode(id, code) {
+  getStmts().updateTotpLastCode.run(code ?? null, id);
+}
+
+module.exports = { create, findAll, findByEmail, findById, count, updatePassword, updateProfile, updateTotp, updateTotpLastCode };

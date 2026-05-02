@@ -272,6 +272,7 @@ function TwoFATab({ currentUser }) {
   const [phase, setPhase] = React.useState('loading')
   const [setupData, setSetupData] = React.useState(null) // { secret, otpauthUri }
   const [code, setCode] = React.useState('')
+  const [disablePassword, setDisablePassword] = React.useState('')  // M2
   const [error, setError] = React.useState(null)
   const [loading, setLoading] = React.useState(false)
 
@@ -309,12 +310,14 @@ function TwoFATab({ currentUser }) {
   async function handleDisable(e) {
     e.preventDefault()
     setError(null)
+    if (!disablePassword) { setError('Current password is required.'); return }
     if (code.length !== 6) { setError('Enter the 6-digit code to confirm.'); return }
     setLoading(true)
     try {
-      await apiFetch('/auth/2fa', { method: 'DELETE', body: JSON.stringify({ code }) })
+      await apiFetch('/auth/2fa', { method: 'DELETE', body: JSON.stringify({ code, currentPassword: disablePassword }) })
       setPhase('idle')
       setCode('')
+      setDisablePassword('')
     } catch (err) { setError(err.message) }
     finally { setLoading(false) }
   }
@@ -351,18 +354,26 @@ function TwoFATab({ currentUser }) {
   if (phase === 'disabling') return (
     <div style={sectionStyle}>
       <div style={{ fontSize: 13, fontWeight: 600, color: C.text, marginBottom: 8 }}>Disable two-factor authentication</div>
-      <div style={{ fontSize: 12, color: C.muted, marginBottom: 16 }}>Enter the 6-digit code from your authenticator app to confirm.</div>
+      <div style={{ fontSize: 12, color: C.muted, marginBottom: 16 }}>Confirm your password and enter the 6-digit authenticator code.</div>
       {error && <div style={{ fontSize: 12, color: C.red, marginBottom: 12 }}>{error}</div>}
-      <form onSubmit={handleDisable} style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-        <input value={code} onChange={e => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
-          placeholder="000000" maxLength={6} autoFocus style={codeInput}
+      <form onSubmit={handleDisable} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <input
+          type="password" value={disablePassword} onChange={e => setDisablePassword(e.target.value)}
+          placeholder="Current password" autoFocus
+          style={{ background: C.bg, border: `1px solid ${C.border}`, borderRadius: 7, padding: '9px 13px', fontSize: 14, color: C.text, outline: 'none' }}
           onFocus={e => { e.target.style.borderColor = C.red }}
           onBlur={e => { e.target.style.borderColor = C.border }} />
-        <button type="submit" disabled={loading} style={{ padding: '9px 22px', borderRadius: 7, border: 'none', background: loading ? C.surface2 : C.red, color: loading ? C.muted : '#fff', fontSize: 13, fontWeight: 600, cursor: loading ? 'default' : 'pointer' }}>
-          {loading ? 'Disabling…' : 'Disable 2FA'}
-        </button>
-        <button type="button" onClick={() => { setPhase('enabled'); setCode(''); setError(null) }}
-          style={{ padding: '9px 14px', borderRadius: 7, border: `1px solid ${C.border}`, background: 'none', color: C.muted, fontSize: 13, cursor: 'pointer' }}>Cancel</button>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+          <input value={code} onChange={e => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+            placeholder="000000" maxLength={6} style={codeInput}
+            onFocus={e => { e.target.style.borderColor = C.red }}
+            onBlur={e => { e.target.style.borderColor = C.border }} />
+          <button type="submit" disabled={loading} style={{ padding: '9px 22px', borderRadius: 7, border: 'none', background: loading ? C.surface2 : C.red, color: loading ? C.muted : '#fff', fontSize: 13, fontWeight: 600, cursor: loading ? 'default' : 'pointer' }}>
+            {loading ? 'Disabling…' : 'Disable 2FA'}
+          </button>
+          <button type="button" onClick={() => { setPhase('enabled'); setCode(''); setDisablePassword(''); setError(null) }}
+            style={{ padding: '9px 14px', borderRadius: 7, border: `1px solid ${C.border}`, background: 'none', color: C.muted, fontSize: 13, cursor: 'pointer' }}>Cancel</button>
+        </div>
       </form>
     </div>
   )
