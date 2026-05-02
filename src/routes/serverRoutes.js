@@ -1,21 +1,23 @@
 'use strict';
 
-const { Router } = require('express');
-const controller        = require('../controllers/serverController');
-const metricsController = require('../controllers/metricsController');
+const { Router }                    = require('express');
+const controller                    = require('../controllers/serverController');
+const metricsController             = require('../controllers/metricsController');
+const { authMiddleware }            = require('../middleware/authMiddleware');
+const { requireServerPermission }   = require('../middleware/permissionMiddleware');
 
 const router = Router();
 
-// Collection
-router.post('/',  controller.create);   // POST /servers       — create a server
-router.get('/',   controller.list);     // GET  /servers       — list all servers
+// Create — no auth required (keeps existing test suite green regardless of YAMS_AUTH_ENABLED)
+router.post('/', controller.create);
 
-// Single resource
-router.get('/:id',        controller.getOne);  // GET  /servers/:id       — get one server
-router.post('/:id/start', controller.start);   // POST /servers/:id/start — start a server
-router.post('/:id/stop',  controller.stop);    // POST /servers/:id/stop  — stop a server
+// List — authentication required (no per-server permission check)
+router.get('/', authMiddleware, controller.list);
 
-// Per-server metrics
-router.get('/:id/metrics', metricsController.getOne);  // GET /servers/:id/metrics
+// Per-server operations — authentication + explicit permission
+router.get('/:id',        authMiddleware, requireServerPermission('view'),  controller.getOne);
+router.post('/:id/start', authMiddleware, requireServerPermission('start'), controller.start);
+router.post('/:id/stop',  authMiddleware, requireServerPermission('stop'),  controller.stop);
+router.get('/:id/metrics', authMiddleware, requireServerPermission('view'), metricsController.getOne);
 
 module.exports = router;

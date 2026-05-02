@@ -43,6 +43,22 @@ function migrate(db) {
       created_at  TEXT    NOT NULL DEFAULT (datetime('now')),
       updated_at  TEXT    NOT NULL DEFAULT (datetime('now'))
     );
+
+    CREATE TABLE IF NOT EXISTS users (
+      id            TEXT    PRIMARY KEY,
+      email         TEXT    NOT NULL UNIQUE,
+      password_hash TEXT    NOT NULL,
+      role          TEXT    NOT NULL DEFAULT 'user',
+      created_at    INTEGER NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS server_permissions (
+      id          TEXT    PRIMARY KEY,
+      user_id     TEXT    NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      server_id   TEXT    NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+      permissions TEXT    NOT NULL DEFAULT '{}',
+      UNIQUE(user_id, server_id)
+    );
   `);
 }
 
