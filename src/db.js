@@ -60,6 +60,9 @@ function migrate(db) {
       UNIQUE(user_id, server_id)
     );
   `);
+
+  // Idempotent: silently ignored if column already exists
+  try { db.exec(`ALTER TABLE users ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 0`); } catch {}
 }
 
 module.exports = { getDb };

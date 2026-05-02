@@ -1,9 +1,10 @@
 'use strict';
 
+const crypto    = require('crypto');
 const bcrypt    = require('bcryptjs');
 const jwt       = require('jsonwebtoken');
 const userModel = require('../models/userModel');
-const { badRequest, conflict, unauthorized } = require('../utils/errors');
+const { badRequest, conflict, unauthorized, notFound } = require('../utils/errors');
 
 const JWT_SECRET  = process.env.JWT_SECRET || 'dev-secret';
 const JWT_EXPIRY  = '7d';
@@ -34,7 +35,22 @@ async function login({ email, password }) {
   const match = await bcrypt.compare(password, user.password_hash);
   if (!match) throw unauthorized('Invalid credentials');
 
-  return jwt.sign({ userId: user.id, role: user.role }, JWT_SECRET, { expiresIn: JWT_EXPIRY });
+  const token = jwt.sign({ userId: user.id, role: user.role }, JWT_SECRET, { expiresIn: JWT_EXPIRY });
+  return { token, forcePasswordChange: user.must_change_password === 1 };
+}
+
+async function changePassword(userId, { currentPassword, newPassword }) {
+  if (!currentPassword)                        throw badRequest('Current password is required');
+  if (!newPassword || newPassword.length < 8)  throw badRequest('New password must be at least 8 characters');
+
+  const user = userModel.findById(userId);
+  if (!user) throw notFound('User not found');
+
+  const match = await bcrypt.compare(currentPassword, user.password_hash);
+  if (!match) throw unauthorized('Current password is incorrect');
+
+  const newHash = await bcrypt.hash(newPassword, SALT_ROUNDS);
+  userModel.updatePassword(userId, newHash);
 }
 
 function verifyToken(token) {
@@ -46,19 +62,54 @@ function verifyToken(token) {
 }
 
 // ── Startup seeding ───────────────────────────────────────────────────────────
-// When YAMS_AUTH_ENABLED=true and no users exist yet, insert a default admin so
-// the system is immediately usable (and tests can bootstrap themselves).
+
+function generateSecurePassword() {
+  const upper   = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+  const lower   = 'abcdefghijklmnopqrstuvwxyz';
+  const digits  = '0123456789';
+  const symbols = '!@#$%^&*()-_=+[]{}|;:,.<>?';
+  const all     = upper + lower + digits + symbols;
+
+  // Guarantee at least one from each class
+  const required = [
+    upper[crypto.randomInt(upper.length)],
+    lower[crypto.randomInt(lower.length)],
+    digits[crypto.randomInt(digits.length)],
+    symbols[crypto.randomInt(symbols.length)],
+  ];
+  const rest = Array.from({ length: 12 }, () => all[crypto.randomInt(all.length)]);
+
+  const chars = [...required, ...rest];
+  for (let i = chars.length - 1; i > 0; i--) {
+    const j = crypto.randomInt(i + 1);
+    [chars[i], chars[j]] = [chars[j], chars[i]];
+  }
+  return chars.join('');
+}
 
 function seedAdminIfEmpty() {
   if (!process.env.YAMS_AUTH_ENABLED) return;
   if (userModel.count() > 0) return;
 
-  const email    = process.env.YAMS_ADMIN_EMAIL    || 'admin@yams.local';
-  const password = process.env.YAMS_ADMIN_PASSWORD || 'admin';
+  const email    = process.env.YAMS_ADMIN_EMAIL || 'admin@yams.local';
+  const provided = process.env.YAMS_ADMIN_PASSWORD;
+  const password = provided || generateSecurePassword();
 
   const passwordHash = bcrypt.hashSync(password, SALT_ROUNDS);
-  userModel.create({ email, passwordHash, role: 'admin' });
-  console.log(`[YAMS] Seeded default admin: ${email}`);
+  userModel.create({ email, passwordHash, role: 'admin', mustChangePassword: !provided });
+
+  if (!provided) {
+    console.log('========================================');
+    console.log(' YAMS INITIAL ADMIN ACCOUNT CREATED');
+    console.log('----------------------------------------');
+    console.log(` Username: ${email}`);
+    console.log(` Password: ${password}`);
+    console.log('----------------------------------------');
+    console.log(' You MUST change this password on first login.');
+    console.log('========================================');
+  } else {
+    console.log(`[YAMS] Seeded default admin: ${email}`);
+  }
 }
 
-module.exports = { createUser, login, verifyToken, seedAdminIfEmpty };
+module.exports = { createUser, login, changePassword, verifyToken, seedAdminIfEmpty };
