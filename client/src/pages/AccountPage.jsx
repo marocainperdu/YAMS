@@ -8,7 +8,6 @@ export default function AccountPage({ currentUser, onUpdate }) {
     { id: 'profile', label: 'Profile' },
     { id: 'password', label: 'Password' },
     { id: 'twofa', label: 'Two-Factor Auth' },
-    { id: 'tokens', label: 'API Tokens' },
   ]
 
   return (
@@ -30,7 +29,6 @@ export default function AccountPage({ currentUser, onUpdate }) {
       {tab === 'profile' && <ProfileTab currentUser={currentUser} onUpdate={onUpdate} />}
       {tab === 'password' && <PasswordTab />}
       {tab === 'twofa' && <TwoFATab currentUser={currentUser} />}
-      {tab === 'tokens' && <APITokenTab />}
     </div>
   )
 }
@@ -440,104 +438,6 @@ function TwoFATab({ currentUser }) {
         style={{ padding: '9px 22px', borderRadius: 7, border: 'none', background: loading ? C.surface2 : C.blue, color: loading ? C.muted : '#fff', fontSize: 13, fontWeight: 600, cursor: loading ? 'default' : 'pointer' }}>
         {loading ? 'Loading…' : 'Set up 2FA'}
       </button>
-    </div>
-  )
-}
-
-function APITokenTab() {
-  const [tokens, setTokens] = React.useState([
-    { id: 1, name: 'CLI access', created: '2026-04-01', lastUsed: '2026-04-30' },
-    { id: 2, name: 'Grafana exporter', created: '2026-03-12', lastUsed: '2026-04-29' },
-  ])
-  const [newName, setNewName] = React.useState('')
-  const [generated, setGenerated] = React.useState(null)
-  const [copied, setCopied] = React.useState(false)
-  const [loading, setLoading] = React.useState(false)
-  const [showForm, setShowForm] = React.useState(false)
-
-  function handleGenerate(e) {
-    e.preventDefault()
-    if (!newName.trim()) return
-    setLoading(true)
-    setTimeout(() => {
-      const token = 'yams_' + Array.from(crypto.getRandomValues(new Uint8Array(24))).map(b => b.toString(16).padStart(2, '0')).join('')
-      const entry = { id: Date.now(), name: newName.trim(), created: new Date().toISOString().slice(0, 10), lastUsed: 'Never' }
-      setTokens(t => [...t, entry])
-      setGenerated(token)
-      setNewName('')
-      setLoading(false)
-      setShowForm(false)
-    }, 600)
-  }
-
-  function handleRevoke(id) {
-    setTokens(t => t.filter(x => x.id !== id))
-  }
-
-  function handleCopy() {
-    navigator.clipboard.writeText(generated).then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000) })
-  }
-
-  const rowStyle = { display: 'flex', alignItems: 'center', padding: '12px 0', borderBottom: `1px solid ${C.border}` }
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-      <div style={{ background: `${C.amber}10`, border: `1px solid ${C.amber}44`, borderRadius: 6, padding: '9px 12px', fontSize: 12, color: C.amber }}>
-        ⚠ FRONTEND MOCK — API token management is not implemented on the backend. Tokens shown here are not real.
-      </div>
-      {generated && (
-        <div style={{ background: `${C.green}10`, border: `1px solid ${C.green}44`, borderRadius: 8, padding: 16 }}>
-          <div style={{ fontSize: 12, fontWeight: 600, color: C.green, marginBottom: 8 }}>Token generated — copy it now. It won't be shown again.</div>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-            <code style={{ flex: 1, fontFamily: 'JetBrains Mono, monospace', fontSize: 12, color: C.text, background: C.bg, border: `1px solid ${C.border}`, borderRadius: 6, padding: '8px 12px', wordBreak: 'break-all' }}>{generated}</code>
-            <button onClick={handleCopy} style={{ padding: '8px 14px', borderRadius: 6, border: `1px solid ${C.border}`, background: 'none', color: copied ? C.green : C.muted, fontSize: 12, cursor: 'pointer' }}>
-              {copied ? '✓ Copied' : 'Copy'}
-            </button>
-            <button onClick={() => setGenerated(null)} style={{ padding: '8px 14px', borderRadius: 6, border: 'none', background: 'none', color: C.dim, fontSize: 12, cursor: 'pointer' }}>✕</button>
-          </div>
-        </div>
-      )}
-
-      <div style={{ background: C.surface2, border: `1px solid ${C.border}`, borderRadius: 10, overflow: 'hidden' }}>
-        <div style={{ padding: '14px 18px', borderBottom: `1px solid ${C.border}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <span style={{ fontSize: 13, fontWeight: 600, color: C.text }}>API Tokens ({tokens.length})</span>
-          {!showForm && (
-            <button onClick={() => setShowForm(true)} style={{ padding: '6px 14px', borderRadius: 6, border: 'none', background: C.blue, color: '#fff', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>+ New token</button>
-          )}
-        </div>
-
-        {showForm && (
-          <form onSubmit={handleGenerate} style={{ padding: '14px 18px', borderBottom: `1px solid ${C.border}`, display: 'flex', gap: 10, alignItems: 'center', background: C.bg, flexWrap: 'wrap' }}>
-            <input
-              value={newName} onChange={e => setNewName(e.target.value)}
-              placeholder="Token name (e.g. CLI access)"
-              style={{ flex: 1, minWidth: 180, background: C.surface2, border: `1px solid ${C.border}`, borderRadius: 6, padding: '8px 12px', fontSize: 13, color: C.text, outline: 'none' }}
-              onFocus={e => { e.target.style.borderColor = C.blue }}
-              onBlur={e => { e.target.style.borderColor = C.border }}
-              autoFocus
-            />
-            <button type="submit" disabled={loading || !newName.trim()} style={{ padding: '8px 16px', borderRadius: 6, border: 'none', background: C.blue, color: '#fff', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>
-              {loading ? 'Generating…' : 'Generate'}
-            </button>
-            <button type="button" onClick={() => { setShowForm(false); setNewName('') }} style={{ padding: '8px 12px', borderRadius: 6, border: `1px solid ${C.border}`, background: 'none', color: C.muted, fontSize: 12, cursor: 'pointer' }}>Cancel</button>
-          </form>
-        )}
-
-        <div style={{ padding: '0 18px' }}>
-          {tokens.length === 0 && (
-            <div style={{ padding: '24px 0', textAlign: 'center', fontSize: 13, color: C.muted }}>No tokens yet.</div>
-          )}
-          {tokens.map((tk, i) => (
-            <div key={tk.id} style={{ ...rowStyle, borderBottom: i < tokens.length - 1 ? `1px solid ${C.border}` : 'none' }}>
-              <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 13, fontWeight: 500, color: C.text }}>{tk.name}</div>
-                <div style={{ fontSize: 11, color: C.dim, marginTop: 2 }}>Created {tk.created} · Last used {tk.lastUsed}</div>
-              </div>
-              <button onClick={() => handleRevoke(tk.id)} style={{ padding: '5px 12px', borderRadius: 6, border: `1px solid ${C.red}66`, background: 'none', color: C.red, fontSize: 12, cursor: 'pointer' }}>Revoke</button>
-            </div>
-          ))}
-        </div>
-      </div>
     </div>
   )
 }
