@@ -26,7 +26,7 @@ async function createUser({ email, password, role = 'user' }) {
   return { id: user.id, email: user.email, role: user.role };
 }
 
-async function login({ email, password }) {
+async function login({ email, password, totpCode }) {
   if (!email || !password) throw badRequest('Email and password are required');
 
   const user = userModel.findByEmail(email.toLowerCase());
@@ -35,14 +35,20 @@ async function login({ email, password }) {
   const match = await bcrypt.compare(password, user.password_hash);
   if (!match) throw unauthorized('Invalid credentials');
 
+  if (user.totp_enabled) {
+    if (!totpCode) return { requiresTOTP: true };
+    const { verifyCode } = require('./twoFAService');
+    if (!verifyCode(user, String(totpCode))) throw unauthorized('Invalid authenticator code');
+  }
+
   const token = jwt.sign({ userId: user.id, role: user.role }, JWT_SECRET, { expiresIn: JWT_EXPIRY });
-  return { token, forcePasswordChange: user.must_change_password === 1 };
+  return { token, forcePasswordChange: user.must_change_password === 1, username: user.username ?? null };
 }
 
 async function getMe(userId) {
   const user = userModel.findById(userId);
   if (!user) throw notFound('User not found');
-  return { id: user.id, email: user.email, username: user.username ?? null, role: user.role, created_at: user.created_at };
+  return { id: user.id, email: user.email, username: user.username ?? null, role: user.role, created_at: user.created_at, totpEnabled: user.totp_enabled === 1 };
 }
 
 async function updateMe(userId, { username, email } = {}) {

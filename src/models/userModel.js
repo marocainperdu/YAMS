@@ -25,6 +25,9 @@ function getStmts() {
       updateProfile: db.prepare(
         `UPDATE users SET email = ?, username = ? WHERE id = ?`
       ),
+      updateTotp: db.prepare(
+        `UPDATE users SET totp_secret = ?, totp_enabled = ? WHERE id = ?`
+      ),
     };
   }
   return stmts;
@@ -61,4 +64,8 @@ function count() {
   return getStmts().count.get().c;
 }
 
-module.exports = { create, findAll, findByEmail, findById, count, updatePassword, updateProfile };
+function updateTotp(id, { secret, enabled }) {
+  getStmts().updateTotp.run(secret ?? null, enabled ? 1 : 0, id);
+}
+
+module.exports = { create, findAll, findByEmail, findById, count, updatePassword, updateProfile, updateTotp };
