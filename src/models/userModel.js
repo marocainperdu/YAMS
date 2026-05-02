@@ -14,7 +14,7 @@ function getStmts() {
          VALUES (?, ?, ?, ?, ?, ?)`
       ),
       findAll: db.prepare(
-        `SELECT id, email, role, created_at FROM users ORDER BY created_at DESC`
+        `SELECT id, email, username, role, created_at FROM users ORDER BY created_at DESC`
       ),
       findByEmail: db.prepare(`SELECT * FROM users WHERE email = ?`),
       findById:    db.prepare(`SELECT * FROM users WHERE id = ?`),
@@ -24,6 +24,12 @@ function getStmts() {
       ),
       updateProfile: db.prepare(
         `UPDATE users SET email = ?, username = ? WHERE id = ?`
+      ),
+      updateTotp: db.prepare(
+        `UPDATE users SET totp_secret = ?, totp_enabled = ? WHERE id = ?`
+      ),
+      updateTotpLastCode: db.prepare(
+        `UPDATE users SET totp_last_code = ? WHERE id = ?`
       ),
     };
   }
@@ -61,4 +67,12 @@ function count() {
   return getStmts().count.get().c;
 }
 
-module.exports = { create, findAll, findByEmail, findById, count, updatePassword, updateProfile };
+function updateTotp(id, { secret, enabled }) {
+  getStmts().updateTotp.run(secret ?? null, enabled ? 1 : 0, id);
+}
+
+function updateTotpLastCode(id, code) {
+  getStmts().updateTotpLastCode.run(code ?? null, id);
+}
+
+module.exports = { create, findAll, findByEmail, findById, count, updatePassword, updateProfile, updateTotp, updateTotpLastCode };

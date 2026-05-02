@@ -138,7 +138,7 @@ function AvatarDropdown({ currentUser, navigate, onLogout }) {
     return () => document.removeEventListener('mousedown', handler)
   }, [])
 
-  const initial = (currentUser?.name || currentUser?.email || '?')[0].toUpperCase()
+  const initial = (currentUser?.username || currentUser?.email || '?')[0].toUpperCase()
 
   return (
     <div ref={ref} style={{ position: 'relative' }}>
@@ -167,9 +167,9 @@ function AvatarDropdown({ currentUser, navigate, onLogout }) {
         }}>
           <div style={{ padding: '12px 14px', borderBottom: `1px solid ${C.border}` }}>
             <div style={{ fontSize: 13, fontWeight: 600, color: C.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {currentUser?.name || currentUser?.email}
+              {currentUser?.username || currentUser?.email}
             </div>
-            {currentUser?.name && (
+            {currentUser?.username && (
               <div style={{ fontSize: 11, color: C.muted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: 2 }}>
                 {currentUser?.email}
               </div>
@@ -294,9 +294,9 @@ export default function App() {
     return () => window.removeEventListener('yams-auth-logout', onAutoLogout)
   }, [])
 
-  function handleLogin({ email, userId, role, token, forcePasswordChange: fpc }) {
+  function handleLogin({ email, userId, role, token, forcePasswordChange: fpc, username }) {
     sessionStorage.setItem('yams_token', token)
-    const user = { email, userId, role }
+    const user = { email, userId, role, username: username ?? null }
     sessionStorage.setItem('yams_user', JSON.stringify(user))
     if (fpc) sessionStorage.setItem('yams_force_pw', 'true')
     else sessionStorage.removeItem('yams_force_pw')

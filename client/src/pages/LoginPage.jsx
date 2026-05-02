@@ -9,33 +9,49 @@ export default function LoginPage({ onLogin }) {
   const [loading, setLoading] = React.useState(false)
   const [showPass, setShowPass] = React.useState(false)
   const [sent, setSent] = React.useState(false)
+  const [totpRequired, setTotpRequired] = React.useState(false)
+  const [totpCode, setTotpCode] = React.useState('')
 
-  async function handleLogin(e) {
-    e.preventDefault()
+  async function submitLogin(totpCodeValue) {
     setError(null)
-    if (!email || !password) { setError('Email and password are required.'); return }
     setLoading(true)
     try {
+      const body_req = { email, password }
+      if (totpCodeValue) body_req.totpCode = totpCodeValue
       const res = await fetch(apiUrl('/auth/login'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify(body_req),
       })
       const body = await res.json().catch(() => ({}))
       console.log('[YAMS] POST /auth/login →', res.status, body)
       if (!res.ok) { setError(body.error || 'Login failed. Check your credentials.'); return }
+
+      if (body.data?.requiresTOTP) { setTotpRequired(true); return }
 
       const token = body.data?.token
       if (!token) { setError('Unexpected server response.'); return }
 
       const [, seg] = token.split('.')
       const payload = JSON.parse(atob(seg.replace(/-/g, '+').replace(/_/g, '/')))
-      onLogin({ email, userId: payload.userId, role: payload.role, token, forcePasswordChange: !!body.data?.forcePasswordChange })
+      onLogin({ email, userId: payload.userId, role: payload.role, token, forcePasswordChange: !!body.data?.forcePasswordChange, username: body.data?.username ?? null })
     } catch {
       setError('Could not reach the server. Is YAMS running?')
     } finally {
       setLoading(false)
     }
+  }
+
+  async function handleLogin(e) {
+    e.preventDefault()
+    if (!email || !password) { setError('Email and password are required.'); return }
+    await submitLogin(null)
+  }
+
+  async function handleTotp(e) {
+    e.preventDefault()
+    if (totpCode.length !== 6) { setError('Enter the 6-digit code.'); return }
+    await submitLogin(totpCode)
   }
 
   function handleForgot(e) {
@@ -58,6 +74,31 @@ export default function LoginPage({ onLogin }) {
       </div>
 
       <div style={{ width: '100%', maxWidth: 380, background: C.surface, border: `1px solid ${C.border}`, borderRadius: 12, overflow: 'hidden', boxShadow: '0 8px 40px #00000044' }}>
+        {totpRequired ? (
+          <div style={{ padding: '28px' }}>
+            <div style={{ fontSize: 15, fontWeight: 700, color: C.text, marginBottom: 6 }}>Two-factor authentication</div>
+            <div style={{ fontSize: 12, color: C.muted, marginBottom: 20 }}>Enter the 6-digit code from your authenticator app.</div>
+            {error && (
+              <div style={{ background: `${C.red}12`, border: `1px solid ${C.red}44`, borderRadius: 6, padding: '9px 12px', fontSize: 12, color: C.red, marginBottom: 16 }}>{error}</div>
+            )}
+            <form onSubmit={handleTotp} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <input
+                value={totpCode}
+                onChange={e => setTotpCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                placeholder="000000" maxLength={6} autoFocus
+                style={{ ...inputStyle, fontSize: 22, letterSpacing: '0.3em', textAlign: 'center', fontFamily: 'monospace', paddingRight: 14 }}
+                onFocus={e => { e.target.style.borderColor = C.blue }}
+                onBlur={e => { e.target.style.borderColor = C.border }}
+              />
+              <button type="submit" disabled={loading || totpCode.length !== 6} style={{ padding: '10px', borderRadius: 7, border: 'none', background: loading ? C.surface2 : C.blue, color: loading ? C.muted : '#fff', fontSize: 14, fontWeight: 600, cursor: loading ? 'default' : 'pointer' }}>
+                {loading ? 'Verifying…' : 'Verify'}
+              </button>
+              <button type="button" onClick={() => { setTotpRequired(false); setTotpCode(''); setError(null) }} style={{ background: 'none', border: 'none', color: C.muted, fontSize: 12, cursor: 'pointer' }}>
+                ← Back
+              </button>
+            </form>
+          </div>
+        ) : (<>
         <div style={{ padding: '24px 28px 0', borderBottom: `1px solid ${C.border}` }}>
           <div style={{ display: 'flex' }}>
             {['login', 'forgot'].map(t => (
@@ -150,6 +191,7 @@ export default function LoginPage({ onLogin }) {
               </form>
           )}
         </div>
+        </>)}
       </div>
 
       <div style={{ marginTop: 24, fontSize: 11, color: C.dim }}>YAMS · Yet Another Minecraft Server manager</div>

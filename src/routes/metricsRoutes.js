@@ -1,9 +1,10 @@
 'use strict';
 
-const { Router } = require('express');
-const { getObservability } = require('../utils/observability');
+const { Router }         = require('express');
+const { getObservability }  = require('../utils/observability');
 const { getMetricsSnapshot } = require('../services/serverService');
-const metricsController = require('../controllers/metricsController');
+const metricsController  = require('../controllers/metricsController');
+const { authMiddleware }  = require('../middleware/authMiddleware');
 
 const router = Router();
 
@@ -24,7 +25,8 @@ const CACHE_TTL = 2000; // ms
  *
  * Cached for CACHE_TTL ms. Stale cache is served on error to avoid dashboard outages.
  */
-router.get('/', (req, res) => {
+// H6 — metrics require authentication
+router.get('/', authMiddleware, (req, res) => {
   try {
     const now = Date.now();
 
@@ -88,6 +90,6 @@ router.get('/', (req, res) => {
 });
 
 // GET /metrics/:id — per-server metrics (TPS, CPU, RAM, players, disk)
-router.get('/:id', metricsController.getOne);
+router.get('/:id', authMiddleware, metricsController.getOne);
 
 module.exports = router;

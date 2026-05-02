@@ -2,12 +2,12 @@ import React from 'react'
 import { apiFetch, C } from '../lib/yamsShared'
 
 const ENGINE_OPTIONS = [
-  { id: 'vanilla', label: 'Vanilla', desc: 'Official Mojang server', icon: '🍦', color: '#3fb950' },
-  { id: 'paper', label: 'Paper', desc: 'High-performance fork', icon: '📄', color: '#388bfd' },
-  { id: 'fabric', label: 'Fabric', desc: 'Lightweight mod loader', icon: '🧵', color: '#d29922' },
-  { id: 'forge', label: 'Forge', desc: 'Popular mod platform', icon: '⚒️', color: '#f0883e' },
-  { id: 'spigot', label: 'Spigot', desc: 'Bukkit-compatible plugins', icon: '🔌', color: '#bc8cff' },
-  { id: 'purpur', label: 'Purpur', desc: 'Fork of Paper with extras', icon: '🟣', color: '#f778ba' },
+  { id: 'vanilla', label: 'Vanilla', desc: 'Official Mojang server', logo: 'https://github.com/Mojang.png', color: '#3fb950' },
+  { id: 'paper', label: 'Paper', desc: 'High-performance fork', logo: 'https://github.com/PaperMC.png', color: '#388bfd' },
+  { id: 'fabric', label: 'Fabric', desc: 'Lightweight mod loader', logo: 'https://github.com/FabricMC.png', color: '#d29922' },
+  { id: 'forge', label: 'Forge', desc: 'Popular mod platform', logo: 'https://github.com/MinecraftForge.png', color: '#f0883e' },
+  { id: 'spigot', label: 'Spigot', desc: 'Bukkit-compatible plugins', logo: 'https://github.com/SpigotMC.png', color: '#bc8cff' },
+  { id: 'purpur', label: 'Purpur', desc: 'Fork of Paper with extras', logo: 'https://github.com/PurpurMC.png', color: '#f778ba' },
 ]
 
 const MC_VERSIONS = [
@@ -160,7 +160,7 @@ function StepEngine({ engine, setEngine }) {
             border: `2px solid ${engine === opt.id ? opt.color : C.border}`,
             transition: 'border-color 150ms, background 150ms', textAlign: 'left',
           }}>
-            <div style={{ fontSize: 22 }}>{opt.icon}</div>
+            <img src={opt.logo} alt={opt.label} style={{ width: 36, height: 36, borderRadius: 6, objectFit: 'contain' }} />
             <div style={{ fontSize: 14, fontWeight: 600, color: C.text }}>{opt.label}</div>
             <div style={{ fontSize: 11, color: C.muted, lineHeight: 1.4 }}>{opt.desc}</div>
           </button>
@@ -292,7 +292,7 @@ function ToggleField({ label, value, onChange }) {
 function StepReview({ engine, version, settings }) {
   const engineOpt = ENGINE_OPTIONS.find(e => e.id === engine) || {}
   const rows = [
-    ['Engine', `${engineOpt.icon || ''} ${engineOpt.label || engine}`],
+    ['Engine', engineOpt.label || engine],
     ['Version', version],
     ['Name', settings.name],
     ['Memory', settings.memory],
