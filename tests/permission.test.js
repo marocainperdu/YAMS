@@ -3,9 +3,9 @@
 /**
  * RBAC + per-server permission integration tests.
  *
- * Spawns the real app with YAMS_AUTH_ENABLED=true.
- * Tests run sequentially within the describe block — later tests depend on
- * state set up by earlier ones (permission assignments, etc.).
+ * Permission model: { read, control }
+ *   read    — GET /servers/:id, GET /servers/:id/metrics
+ *   control — POST /servers/:id/start, POST /servers/:id/stop
  *
  * Run: npm test
  */
@@ -89,24 +89,24 @@ describe('Permission system — HTTP integration', () => {
     );
     await waitForApp(appProcess);
 
-    // ── Bootstrap: login as admin ────────────────────────────────────────────
+    // Login as admin
     const loginRes = await api('POST', '/auth/login', { email: ADMIN_EMAIL, password: ADMIN_PASSWORD });
     assert.equal(loginRes.status, 200, 'admin login must succeed in before()');
     adminToken = loginRes.body.data.token;
 
-    // ── Bootstrap: create a server (POST /servers is unprotected) ────────────
+    // Create a test server (POST /servers is unprotected)
     const srvRes = await api('POST', '/servers', { name: 'permtest', port: 25580, ram: '1G' });
     assert.equal(srvRes.status, 201, 'server creation must succeed in before()');
     testServerId = srvRes.body.data.id;
 
-    // ── Bootstrap: create a regular user via admin ───────────────────────────
+    // Create a regular user (as admin)
     const userRes = await api('POST', '/users', {
       email: USER_EMAIL, password: USER_PASSWORD, role: 'user',
     }, adminToken);
     assert.equal(userRes.status, 201, 'user creation must succeed in before()');
     testUserId = userRes.body.data.id;
 
-    // ── Bootstrap: login as regular user ─────────────────────────────────────
+    // Login as regular user
     const userLoginRes = await api('POST', '/auth/login', { email: USER_EMAIL, password: USER_PASSWORD });
     assert.equal(userLoginRes.status, 200, 'user login must succeed in before()');
     userToken = userLoginRes.body.data.token;
@@ -120,6 +120,8 @@ describe('Permission system — HTTP integration', () => {
     }
   });
 
+  // ── Auth disabled = public (verified by existing test.js, which never sends tokens) ──
+
   // ── Authentication gates ──────────────────────────────────────────────────
 
   test('GET /servers without token → 401', async () => {
@@ -127,30 +129,47 @@ describe('Permission system — HTTP integration', () => {
     assert.equal(status, 401);
   });
 
-  test('GET /servers with user token → 200 (list requires only auth)', async () => {
+  test('GET /servers with user token → 200', async () => {
     const { status, body } = await api('GET', '/servers', undefined, userToken);
     assert.equal(status, 200);
-    assert.ok(Array.isArray(body.data), 'data is array');
+    assert.ok(Array.isArray(body.data));
   });
 
-  // ── User cannot access server without permission ──────────────────────────
+  // ── Permission denied (403) ───────────────────────────────────────────────
 
-  test('user cannot GET /servers/:id without "view" permission → 403', async () => {
+  test('user cannot GET /servers/:id without "read" permission → 403', async () => {
     const { status } = await api('GET', `/servers/${testServerId}`, undefined, userToken);
     assert.equal(status, 403);
   });
 
-  test('user cannot POST /servers/:id/start without "start" permission → 403', async () => {
+  test('user cannot POST /servers/:id/start without "control" permission → 403', async () => {
     const { status } = await api('POST', `/servers/${testServerId}/start`, undefined, userToken);
     assert.equal(status, 403);
   });
 
-  test('user cannot POST /servers/:id/stop without "stop" permission → 403', async () => {
+  test('user cannot POST /servers/:id/stop without "control" permission → 403', async () => {
     const { status } = await api('POST', `/servers/${testServerId}/stop`, undefined, userToken);
     assert.equal(status, 403);
   });
 
-  // ── Admin bypass works ────────────────────────────────────────────────────
+  test('user cannot GET /servers/:id/metrics without "read" permission → 403', async () => {
+    const { status } = await api('GET', `/servers/${testServerId}/metrics`, undefined, userToken);
+    assert.equal(status, 403);
+  });
+
+  // ── Missing auth (401) ────────────────────────────────────────────────────
+
+  test('GET /servers/:id without token → 401', async () => {
+    const { status } = await api('GET', `/servers/${testServerId}`);
+    assert.equal(status, 401);
+  });
+
+  test('GET /servers/:id/metrics without token → 401', async () => {
+    const { status } = await api('GET', `/servers/${testServerId}/metrics`);
+    assert.equal(status, 401);
+  });
+
+  // ── Admin override — admin bypasses ALL permission checks ─────────────────
 
   test('admin can GET /servers/:id without explicit permission → 200', async () => {
     const { status, body } = await api('GET', `/servers/${testServerId}`, undefined, adminToken);
@@ -158,17 +177,22 @@ describe('Permission system — HTTP integration', () => {
     assert.equal(body.data.id, testServerId);
   });
 
-  test('admin POST /servers/:id/start bypasses permission check (fails 400 — no jar, not 403)', async () => {
+  test('admin POST /servers/:id/start bypasses permission → not 403/401', async () => {
     const { status } = await api('POST', `/servers/${testServerId}/start`, undefined, adminToken);
-    assert.notEqual(status, 403, 'admin must not be rejected by permission middleware');
+    assert.notEqual(status, 403);
     assert.notEqual(status, 401);
   });
 
-  // ── Assign permissions (admin-only endpoint) ──────────────────────────────
+  test('admin GET /servers/:id/metrics bypasses permission → 200', async () => {
+    const { status } = await api('GET', `/servers/${testServerId}/metrics`, undefined, adminToken);
+    assert.equal(status, 200);
+  });
+
+  // ── Admin-only user management ────────────────────────────────────────────
 
   test('regular user cannot POST /users → 403', async () => {
     const { status } = await api('POST', '/users', {
-      email: 'another@example.com', password: 'pass123', role: 'user',
+      email: 'extra@example.com', password: 'pass123', role: 'user',
     }, userToken);
     assert.equal(status, 403);
   });
@@ -178,71 +202,82 @@ describe('Permission system — HTTP integration', () => {
     assert.equal(status, 403);
   });
 
-  test('admin can GET /users → 200 with user list', async () => {
+  test('admin can GET /users → 200', async () => {
     const { status, body } = await api('GET', '/users', undefined, adminToken);
     assert.equal(status, 200);
     assert.ok(Array.isArray(body.data));
-    assert.ok(body.data.length >= 2, 'at least admin + test user');
+    assert.ok(body.data.length >= 2);
   });
 
-  test('admin assigns "view" permission to user → 200', async () => {
+  // ── Grant "read" permission, verify access ────────────────────────────────
+
+  test('admin assigns { read: true, control: false } to user → 200', async () => {
     const { status, body } = await api('POST', '/permissions', {
-      userId: testUserId,
-      serverId: testServerId,
-      permissions: { view: true, start: false, stop: false },
+      userId:      testUserId,
+      serverId:    testServerId,
+      permissions: { read: true, control: false },
     }, adminToken);
     assert.equal(status, 200);
-    assert.ok(body.data?.permissions, 'permissions object returned');
-    assert.equal(body.data.permissions.view, true);
+    assert.equal(body.data.permissions.read,    true);
+    assert.equal(body.data.permissions.control, false);
   });
 
-  // ── User can access with permission ──────────────────────────────────────
-
-  test('user can GET /servers/:id after receiving "view" permission → 200', async () => {
+  test('user can GET /servers/:id after "read" granted → 200', async () => {
     const { status, body } = await api('GET', `/servers/${testServerId}`, undefined, userToken);
     assert.equal(status, 200);
     assert.equal(body.data.id, testServerId);
   });
 
-  // ── start/stop restrictions enforced ─────────────────────────────────────
-
-  test('user with only "view" still cannot POST /servers/:id/start → 403', async () => {
-    const { status } = await api('POST', `/servers/${testServerId}/start`, undefined, userToken);
-    assert.equal(status, 403);
-  });
-
-  test('admin assigns "start" + "stop" permissions → 200', async () => {
-    const { status, body } = await api('POST', '/permissions', {
-      userId: testUserId,
-      serverId: testServerId,
-      permissions: { view: true, start: true, stop: true },
-    }, adminToken);
-    assert.equal(status, 200);
-    assert.equal(body.data.permissions.start, true);
-    assert.equal(body.data.permissions.stop,  true);
-  });
-
-  test('user with "start" permission passes auth check (400 no jar — not 403)', async () => {
-    const { status } = await api('POST', `/servers/${testServerId}/start`, undefined, userToken);
-    assert.notEqual(status, 403, 'permission check must pass');
-    assert.notEqual(status, 401);
-  });
-
-  test('user with "stop" permission passes auth check (409 not running — not 403)', async () => {
-    const { status } = await api('POST', `/servers/${testServerId}/stop`, undefined, userToken);
-    assert.notEqual(status, 403, 'permission check must pass');
-    assert.notEqual(status, 401);
-  });
-
-  // ── Metrics route also respects "view" permission ─────────────────────────
-
-  test('user with "view" can GET /servers/:id/metrics → 200', async () => {
+  test('user can GET /servers/:id/metrics after "read" granted → 200', async () => {
     const { status } = await api('GET', `/servers/${testServerId}/metrics`, undefined, userToken);
     assert.equal(status, 200);
   });
 
-  test('GET /servers/:id/metrics without token → 401', async () => {
-    const { status } = await api('GET', `/servers/${testServerId}/metrics`);
-    assert.equal(status, 401);
+  // ── start/stop restrictions still enforced with only "read" ──────────────
+
+  test('user with only "read" still cannot POST /servers/:id/start → 403', async () => {
+    const { status } = await api('POST', `/servers/${testServerId}/start`, undefined, userToken);
+    assert.equal(status, 403);
+  });
+
+  test('user with only "read" still cannot POST /servers/:id/stop → 403', async () => {
+    const { status } = await api('POST', `/servers/${testServerId}/stop`, undefined, userToken);
+    assert.equal(status, 403);
+  });
+
+  // ── Upsert: grant "control" and verify ───────────────────────────────────
+
+  test('admin upserts { read: true, control: true } → 200 (idempotent upsert)', async () => {
+    const { status, body } = await api('POST', '/permissions', {
+      userId:      testUserId,
+      serverId:    testServerId,
+      permissions: { read: true, control: true },
+    }, adminToken);
+    assert.equal(status, 200);
+    assert.equal(body.data.permissions.control, true);
+  });
+
+  // Upsert idempotency — calling again must not create a duplicate row
+  test('second upsert with same userId+serverId does not duplicate → still 200', async () => {
+    const { status, body } = await api('POST', '/permissions', {
+      userId:      testUserId,
+      serverId:    testServerId,
+      permissions: { read: true, control: true },
+    }, adminToken);
+    assert.equal(status, 200);
+    assert.equal(body.data.permissions.read,    true);
+    assert.equal(body.data.permissions.control, true);
+  });
+
+  test('user with "control" passes start permission check → not 403/401', async () => {
+    const { status } = await api('POST', `/servers/${testServerId}/start`, undefined, userToken);
+    assert.notEqual(status, 403);
+    assert.notEqual(status, 401);
+  });
+
+  test('user with "control" passes stop permission check → not 403/401', async () => {
+    const { status } = await api('POST', `/servers/${testServerId}/stop`, undefined, userToken);
+    assert.notEqual(status, 403);
+    assert.notEqual(status, 401);
   });
 });

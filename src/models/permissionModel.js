@@ -20,6 +20,9 @@ function getStmts() {
       findByUser: db.prepare(
         `SELECT * FROM server_permissions WHERE user_id = ?`
       ),
+      findByServer: db.prepare(
+        `SELECT * FROM server_permissions WHERE server_id = ?`
+      ),
     };
   }
   return stmts;
@@ -30,7 +33,7 @@ function parse(row) {
   return { ...row, permissions: JSON.parse(row.permissions) };
 }
 
-function upsert({ userId, serverId, permissions }) {
+function assignPermissions({ userId, serverId, permissions }) {
   const permJson = typeof permissions === 'string'
     ? permissions
     : JSON.stringify(permissions);
@@ -46,4 +49,8 @@ function findByUser(userId) {
   return getStmts().findByUser.all(userId).map(parse);
 }
 
-module.exports = { upsert, findByUserAndServer, findByUser };
+function findByServer(serverId) {
+  return getStmts().findByServer.all(serverId).map(parse);
+}
+
+module.exports = { assignPermissions, findByUserAndServer, findByUser, findByServer };
