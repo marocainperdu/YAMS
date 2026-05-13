@@ -20,6 +20,9 @@ function getStmts() {
       count: db.prepare(
         `SELECT COUNT(*) AS n FROM users`
       ),
+      incrementTokenVersion: db.prepare(
+        `UPDATE users SET token_version = token_version + 1 WHERE id = ?`
+      ),
     };
   }
   return stmts;
@@ -42,4 +45,8 @@ function count() {
   return getStmts().count.get().n;
 }
 
-module.exports = { create, findById, findByUsername, count };
+function incrementTokenVersion(id) {
+  getStmts().incrementTokenVersion.run(id);
+}
+
+module.exports = { create, findById, findByUsername, count, incrementTokenVersion };

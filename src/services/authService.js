@@ -25,7 +25,7 @@ function hashToken(raw) {
 
 function issueAccessToken(user) {
   return jwt.sign(
-    { userId: user.id, role: user.role },
+    { userId: user.id, role: user.role, tokenVersion: user.token_version },
     jwtSecret(),
     { algorithm: 'HS256', expiresIn: ACCESS_TOKEN_TTL }
   );
@@ -117,8 +117,11 @@ function logout(rawToken) {
 }
 
 // ─── logoutAll ───────────────────────────────────────────────────────────────
+// Increments token_version so all outstanding access tokens are immediately
+// rejected by authMiddleware — even before their 15-minute TTL expires.
 
 function logoutAll(userId) {
+  userModel.incrementTokenVersion(userId);
   refreshTokenModel.revokeAll(userId);
 }
 
