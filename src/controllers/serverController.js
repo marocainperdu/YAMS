@@ -70,4 +70,16 @@ async function stop(req, res, next) {
   }
 }
 
-module.exports = { create, list, getOne, start, stop };
+/**
+ * DELETE /servers/:id
+ */
+async function remove(req, res, next) {
+  try {
+    await serverService.deleteServer(req.params.id);
+    res.status(204).end();
+  } catch (err) {
+    next(err);
+  }
+}
+
+module.exports = { create, list, getOne, start, stop, remove };
