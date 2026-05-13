@@ -75,7 +75,7 @@ async function exportWorld(req, res, next) {
   return reqCtx.run(buildCtx(req), async () => {
     try {
       const server = getServer(req);
-      await worldService.exportWorld(server.path, req.params.name, res);
+      await worldService.exportWorld(server.id, server.path, req.params.name, res);
     } catch (err) { next(err); }
   });
 }

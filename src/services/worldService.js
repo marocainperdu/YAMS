@@ -752,12 +752,18 @@ async function importWorld(serverId, serverPath, req) {
   }
 }
 
-async function exportWorld(serverPath, name, res) {
+async function exportWorld(serverId, serverPath, name, res) {
   validateServerPath(serverPath);
   validateName(name);
   resolveWorldPath(serverPath, name);
   await checkNotSymlink(path.join(serverPath, name));
   if (!(await isValidWorld(serverPath, name))) throw notFound('World not found', 'WORLD_NOT_FOUND');
+
+  const serverModel = require('../models/serverModel');
+  const server = serverModel.findById(serverId);
+  if (server?.status === 'running') {
+    throw conflict('Stop the server before exporting a world', 'SERVER_RUNNING');
+  }
 
   const worldPath = path.join(serverPath, name);
   const date = new Date().toISOString().slice(0, 10);
