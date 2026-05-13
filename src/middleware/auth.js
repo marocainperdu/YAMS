@@ -18,6 +18,11 @@ if (AUTH_ENABLED) {
 // Only required when auth is enabled so that test runs without the package
 // installed would still work (the guard above short-circuits first).
 const jwt = AUTH_ENABLED ? require('jsonwebtoken') : null;
+const { securityLog } = require('../utils/securityLog');
+
+function clientIp(req) {
+  return req.ip ?? req.socket?.remoteAddress ?? 'unknown';
+}
 
 // ─── Authentication ───────────────────────────────────────────────────────────
 //
@@ -28,13 +33,16 @@ const jwt = AUTH_ENABLED ? require('jsonwebtoken') : null;
 function authMiddleware(req, res, next) {
   if (!AUTH_ENABLED) return next();
 
+  const ip     = clientIp(req);
   const header = req.headers['authorization'] ?? '';
   if (!header.startsWith('Bearer ')) {
+    securityLog('warn', 'auth.failed', { ip, reason: 'missing_bearer' });
     return res.status(401).json({ error: 'Authentication required', code: 'AUTH_REQUIRED' });
   }
 
   const token = header.slice(7);
   if (!token) {
+    securityLog('warn', 'auth.failed', { ip, reason: 'empty_token' });
     return res.status(401).json({ error: 'Invalid token', code: 'INVALID_TOKEN' });
   }
 
@@ -43,7 +51,8 @@ function authMiddleware(req, res, next) {
     // algorithms whitelist prevents algorithm-confusion attacks (e.g. RS256→HS256 swap,
     // or the 'none' algorithm that bypasses signature verification entirely).
     payload = jwt.verify(token, process.env.JWT_SECRET, { algorithms: ['HS256'] });
-  } catch {
+  } catch (err) {
+    securityLog('warn', 'auth.failed', { ip, reason: err.name }); // e.g. TokenExpiredError
     return res.status(401).json({ error: 'Invalid or expired token', code: 'INVALID_TOKEN' });
   }
 
@@ -54,9 +63,11 @@ function authMiddleware(req, res, next) {
   const roleOk     = typeof payload.role === 'string' && validRoles.has(payload.role);
 
   if (!userIdOk || !roleOk) {
+    securityLog('warn', 'auth.failed', { ip, reason: 'invalid_claims' });
     return res.status(401).json({ error: 'Token is missing required claims', code: 'INVALID_TOKEN' });
   }
 
+  securityLog('info', 'auth.success', { ip, userId: payload.userId, role: payload.role });
   req.user = payload; // { userId, role, iat, exp, ... }
   next();
 }
@@ -83,15 +94,17 @@ function requireServerPermission(action) {
 
     // authMiddleware must run before this.
     if (!req.user) {
+      securityLog('warn', 'rbac.denied', { ip: clientIp(req), action, reason: 'no_user' });
       return res.status(403).json({ error: 'Forbidden', code: 'FORBIDDEN' });
     }
 
-    const { role } = req.user;
+    const { role, userId } = req.user;
 
     if (role === 'admin') return next();
     if (action === 'read'    && (role === 'operator' || role === 'user')) return next();
     if (action === 'control' &&  role === 'operator')                     return next();
 
+    securityLog('warn', 'rbac.denied', { ip: clientIp(req), userId, role, action, serverId: req.params?.id });
     return res.status(403).json({ error: 'Insufficient permissions', code: 'FORBIDDEN' });
   };
 }

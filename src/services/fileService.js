@@ -6,6 +6,7 @@ const fsp  = require('fs/promises');
 const fs   = require('fs');
 
 const { badRequest, notFound, conflict, forbidden } = require('../utils/errors');
+const { securityLog } = require('../utils/securityLog');
 
 const SERVERS_ROOT = process.env.YAMS_SERVERS_ROOT
   || path.join(__dirname, '..', '..', 'servers');
@@ -17,6 +18,12 @@ const FILE_UPLOAD_LIMIT = process.env.FILE_UPLOAD_LIMIT
 const FILE_LIST_LIMIT = process.env.FILE_LIST_LIMIT
   ? parseInt(process.env.FILE_LIST_LIMIT, 10)
   : 1000;
+
+// Extensions that are never allowed as upload targets — prevents RCE via
+// server.jar overwrite or execution of uploaded scripts on the host OS.
+const FORBIDDEN_UPLOAD_EXTENSIONS = new Set([
+  '.jar', '.sh', '.bash', '.exe', '.bat', '.cmd', '.ps1',
+]);
 
 // ─── Inline MIME map ─────────────────────────────────────────────────────────
 const MIME = {
@@ -160,10 +167,17 @@ async function uploadFile(serverId, destDir, req, overwrite) {
           return safeReject(badRequest('Uploaded file has no name'));
         }
 
-        // Reject .jar uploads to prevent server.jar overwrite / RCE.
-        if (path.extname(filename).toLowerCase() === '.jar') {
+        // Reject executable / script uploads to prevent RCE.
+        const ext = path.extname(filename).toLowerCase();
+        if (FORBIDDEN_UPLOAD_EXTENSIONS.has(ext)) {
           stream.resume();
-          return safeReject(badRequest('Uploading .jar files is not allowed', 'FORBIDDEN_FILE_TYPE'));
+          securityLog('warn', 'upload.rejected', {
+            ip:     req.ip ?? req.socket?.remoteAddress ?? 'unknown',
+            userId: req.user?.userId ?? null,
+            ext,
+            serverId,
+          });
+          return safeReject(badRequest(`Uploading ${ext} files is not allowed`, 'FORBIDDEN_FILE_TYPE'));
         }
 
         const { resolved: fp } = resolveSafePath(serverId, path.join(destDir, filename));
