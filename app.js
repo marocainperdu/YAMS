@@ -132,6 +132,7 @@ const server = app.listen(PORT, BIND, () => {
   console.log('  POST   /servers');
   console.log('  GET    /servers');
   console.log('  GET    /servers/:id');
+  console.log('  DELETE /servers/:id');
   console.log('  POST   /servers/:id/start');
   console.log('  POST   /servers/:id/stop');
   console.log('  GET    /servers/:id/metrics');

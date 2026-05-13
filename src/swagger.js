@@ -15,8 +15,39 @@ const swaggerSpec = {
   },
   servers: [{ url: 'http://localhost:3000', description: 'Local dev server' }],
 
+  // Applied to all endpoints. Public endpoints (login, refresh) override with security: [].
+  // Only enforced when YAMS_AUTH_ENABLED=true.
+  security: [{ bearerAuth: [] }],
+
   components: {
+    securitySchemes: {
+      bearerAuth: {
+        type: 'http',
+        scheme: 'bearer',
+        bearerFormat: 'JWT',
+        description:
+          'Access token issued by `POST /auth/login`. ' +
+          'Include as: `Authorization: Bearer <token>`. ' +
+          'Only enforced when `YAMS_AUTH_ENABLED=true`.',
+      },
+    },
+
     schemas: {
+      Tokens: {
+        type: 'object',
+        properties: {
+          accessToken:  { type: 'string', description: 'Short-lived JWT (15 min)',         example: 'eyJhbGciOiJIUzI1NiJ9...' },
+          refreshToken: { type: 'string', description: 'Long-lived opaque token (7 days)', example: 'a3f8b1c2d4e5...' },
+        },
+      },
+      UserPublic: {
+        type: 'object',
+        properties: {
+          id:       { type: 'string', format: 'uuid' },
+          username: { type: 'string', example: 'alice' },
+          role:     { type: 'string', enum: ['admin', 'operator', 'user'], example: 'operator' },
+        },
+      },
       Server: {
         type: 'object',
         properties: {
@@ -185,6 +216,31 @@ const swaggerSpec = {
             description: 'Server not found',
             content: {
               'application/json': { schema: { $ref: '#/components/schemas/Error' } },
+            },
+          },
+        },
+      },
+
+      delete: {
+        summary: 'Delete a server',
+        operationId: 'deleteServer',
+        description:
+          'Removes the server record from the database and permanently deletes the server directory ' +
+          'on disk (all worlds, plugins, logs, etc.). The server must be stopped first (409 SERVER_RUNNING). ' +
+          'Directory removal errors are logged but do not fail the request — the DB record is always deleted.',
+        responses: {
+          204: { description: 'Server deleted — no body' },
+          404: {
+            description: 'Server not found',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } },
+          },
+          409: {
+            description: 'Server is running',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ErrorWithCode' },
+                example: { error: 'Stop the server before deleting it', code: 'SERVER_RUNNING' },
+              },
             },
           },
         },
@@ -543,7 +599,7 @@ const swaggerSpec = {
         description:
           'Streams the world directory as a ZIP archive. The world is placed at the root of the ' +
           'archive (entries start with `{name}/`). `.lock` files are excluded. ' +
-          '**Export is allowed while the server is running** — it is a read-only operation. ' +
+          '**The server must be stopped before exporting** (409 SERVER_RUNNING). ' +
           'If a streaming error occurs after headers are sent, the connection is closed abruptly ' +
           '(the client receives a truncated ZIP rather than a JSON error).',
         responses: {
@@ -577,6 +633,194 @@ const swaggerSpec = {
             description: 'Server or world not found',
             content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorWithCode' } } },
           },
+          409: {
+            description: 'Server is running',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ErrorWithCode' },
+                example: { error: 'Stop the server before exporting a world', code: 'SERVER_RUNNING' },
+              },
+            },
+          },
+        },
+      },
+    },
+
+    // ── Auth ─────────────────────────────────────────────────────────────────
+
+    '/auth/login': {
+      post: {
+        summary: 'Log in and obtain tokens',
+        operationId: 'login',
+        tags: ['Auth'],
+        security: [],
+        description:
+          'Validates credentials and returns a short-lived access token (15 min) and a long-lived ' +
+          'refresh token (7 days). Rate-limited to 10 requests per 15 min per IP.',
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['username', 'password'],
+                properties: {
+                  username: { type: 'string', example: 'admin' },
+                  password: { type: 'string', format: 'password', example: 'changeme' },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          200: {
+            description: 'Login successful',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    data: { $ref: '#/components/schemas/Tokens' },
+                    user: { $ref: '#/components/schemas/UserPublic' },
+                  },
+                },
+              },
+            },
+          },
+          400: { description: 'Missing username or password', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+          401: { description: 'Invalid credentials', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+          429: { description: 'Rate limit exceeded', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+        },
+      },
+    },
+
+    '/auth/refresh': {
+      post: {
+        summary: 'Refresh access token',
+        operationId: 'refreshToken',
+        tags: ['Auth'],
+        security: [],
+        description:
+          'Exchanges a valid refresh token for a new access + refresh token pair. ' +
+          'The consumed refresh token is immediately revoked (rotation). ' +
+          'Accepts the token in `Authorization: Bearer <token>` header or `refreshToken` body field. ' +
+          'Rate-limited to 10 requests per 15 min per IP.',
+        requestBody: {
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  refreshToken: { type: 'string', description: 'Refresh token (alternative to Bearer header)', example: 'a3f8b1c2d4e5...' },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          200: {
+            description: 'New token pair issued',
+            content: {
+              'application/json': {
+                schema: { type: 'object', properties: { data: { $ref: '#/components/schemas/Tokens' } } },
+              },
+            },
+          },
+          401: { description: 'Invalid, expired, or already-revoked refresh token', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorWithCode' } } } },
+          429: { description: 'Rate limit exceeded', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+        },
+      },
+    },
+
+    '/auth/logout': {
+      post: {
+        summary: 'Log out (revoke current refresh token)',
+        operationId: 'logout',
+        tags: ['Auth'],
+        description:
+          'Revokes the refresh token supplied in the request body. ' +
+          'The access token remains valid until its 15-min TTL expires; ' +
+          'use `POST /auth/logout-all` to invalidate all outstanding access tokens immediately.',
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['refreshToken'],
+                properties: {
+                  refreshToken: { type: 'string', example: 'a3f8b1c2d4e5...' },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          204: { description: 'Logged out — no body' },
+          400: { description: 'Missing refreshToken', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+          401: { description: 'Invalid or expired access token', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorWithCode' } } } },
+        },
+      },
+    },
+
+    '/auth/logout-all': {
+      post: {
+        summary: 'Log out everywhere (invalidate all tokens)',
+        operationId: 'logoutAll',
+        tags: ['Auth'],
+        description:
+          'Increments the user\'s `token_version`. All outstanding access tokens issued before ' +
+          'this call are immediately rejected by `authMiddleware`. All refresh tokens are also revoked.',
+        responses: {
+          204: { description: 'All sessions terminated — no body' },
+          401: { description: 'Invalid or expired access token', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorWithCode' } } } },
+        },
+      },
+    },
+
+    '/auth/register': {
+      post: {
+        summary: 'Register a new user (admin only)',
+        operationId: 'register',
+        tags: ['Auth'],
+        description:
+          'Creates a new user account. Requires an admin access token. ' +
+          'Passwords are hashed with bcrypt (cost 12). ' +
+          'Roles: `admin` > `operator` > `user`.',
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['username', 'password'],
+                properties: {
+                  username: { type: 'string', minLength: 3, maxLength: 32, example: 'alice' },
+                  password: { type: 'string', format: 'password', minLength: 8, example: 'hunter2!' },
+                  role: {
+                    type: 'string',
+                    enum: ['admin', 'operator', 'user'],
+                    default: 'user',
+                    example: 'operator',
+                  },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          201: {
+            description: 'User created',
+            content: {
+              'application/json': {
+                schema: { type: 'object', properties: { data: { $ref: '#/components/schemas/UserPublic' } } },
+              },
+            },
+          },
+          400: { description: 'Validation error', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+          401: { description: 'Invalid or expired access token', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorWithCode' } } } },
+          403: { description: 'Insufficient role (admin required)', content: { 'application/json': { schema: { $ref: '#/components/schemas/ErrorWithCode' } } } },
+          409: { description: 'Username already taken', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
         },
       },
     },

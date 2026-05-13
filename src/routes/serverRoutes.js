@@ -12,7 +12,8 @@ router.post('/',  controller.create);   // POST /servers       — create a serv
 router.get('/',   controller.list);     // GET  /servers       — list all servers
 
 // Single resource
-router.get('/:id',        controller.getOne);  // GET  /servers/:id       — get one server
+router.get('/:id',        controller.getOne);  // GET    /servers/:id       — get one server
+router.delete('/:id',     controller.remove);  // DELETE /servers/:id       — delete a server
 router.post('/:id/start', heavyOpLimiter, controller.start);   // POST /servers/:id/start — start a server
 router.post('/:id/stop',  controller.stop);    // POST /servers/:id/stop  — stop a server
 
