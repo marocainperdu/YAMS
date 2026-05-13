@@ -122,6 +122,12 @@ async function findBackup(serverPathOrId, backupId) {
 async function createBackup(serverId, serverPathOrId) {
   const serverRoot = resolveServerRoot(serverPathOrId || serverId);
 
+  const serverModel = require('../models/serverModel');
+  const server = serverModel.findById(serverId);
+  if (server?.status === 'running') {
+    throw conflict('Stop the server before creating a backup', 'SERVER_RUNNING');
+  }
+
   if (activeRestores.has(serverId)) {
     throw conflict('A restore is in progress for this server; cannot create backup');
   }
