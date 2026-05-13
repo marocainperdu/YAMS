@@ -46,7 +46,7 @@ RUN mkdir -p /app/data /app/servers \
 USER node
 
 ENV PORT=3000 \
-    BIND_ADDRESS=0.0.0.0 \
+    BIND_ADDRESS=127.0.0.1 \
     YAMS_DB=/app/data/yams.db \
     YAMS_SERVERS_ROOT=/app/servers \
     NODE_ENV=production
