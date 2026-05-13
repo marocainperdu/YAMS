@@ -160,6 +160,12 @@ async function uploadFile(serverId, destDir, req, overwrite) {
           return safeReject(badRequest('Uploaded file has no name'));
         }
 
+        // Reject .jar uploads to prevent server.jar overwrite / RCE.
+        if (path.extname(filename).toLowerCase() === '.jar') {
+          stream.resume();
+          return safeReject(badRequest('Uploading .jar files is not allowed', 'FORBIDDEN_FILE_TYPE'));
+        }
+
         const { resolved: fp } = resolveSafePath(serverId, path.join(destDir, filename));
         finalPath = fp;
         tmpPath   = finalPath + '.yams_tmp';

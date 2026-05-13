@@ -32,7 +32,15 @@ const PORT = process.env.PORT || 3000;
 // Middleware
 // ---------------------------------------------------------------------------
 
-app.use(express.json());
+app.use(express.json({ limit: '16kb' }));
+
+// Security headers
+app.use((_req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  next();
+});
 
 // Basic request logger
 app.use((req, _res, next) => {
@@ -102,7 +110,8 @@ getDb();
 
 // Capture the http.Server so we can attach the WebSocket server to it.
 // Both HTTP and WS share the same port — no separate WS_PORT needed.
-const server = app.listen(PORT, () => {
+const BIND   = process.env.BIND_ADDRESS || '127.0.0.1';
+const server = app.listen(PORT, BIND, () => {
   console.log(`[YAMS] Running on http://localhost:${PORT}`);
   console.log('[YAMS] Endpoints:');
   console.log('  POST   /servers');
