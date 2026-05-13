@@ -1,142 +1,279 @@
-import { useState, useEffect, useReducer, useCallback } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
-import Sidebar from '../components/Sidebar'
-import Console from '../components/Console'
-import CommandInput from '../components/CommandInput'
-import StatusBar from '../components/StatusBar'
-import Toast from '../components/Toast'
-import useWebSocket from '../hooks/useWebSocket'
-import { C } from '../styles/tokens'
+import React from 'react'
+import { Terminal } from 'xterm'
+import { FitAddon } from 'xterm-addon-fit'
+import 'xterm/css/xterm.css'
+import { apiFetch, C } from '../lib/yamsShared'
 
-function toastReducer(state, action) {
-  switch (action.type) {
-    case 'ADD':    return [...state, { ...action.payload, id: Date.now() }]
-    case 'REMOVE': return state.filter(t => t.id !== action.payload)
-    default:       return state
-  }
+const ANSI = {
+  reset: '\x1b[0m',
+  bold: '\x1b[1m',
+  dim: '\x1b[2m',
+  white: '\x1b[37m',
+  gray: '\x1b[90m',
+  green: '\x1b[32m',
+  yellow: '\x1b[33m',
+  red: '\x1b[91m',
+  cyan: '\x1b[36m',
 }
 
-export default function ConsolePage() {
-  const { id: urlServerId } = useParams()
-  const navigate = useNavigate()
+function formatLogLine({ type, data, timestamp }) {
+  const ts = new Date(timestamp || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+  const prefix = `${ANSI.gray}${ts}${ANSI.reset} `
+  if (type === 'stderr') {
+    return `${prefix}${ANSI.red}${data}${ANSI.reset}`
+  }
+  if (type === 'system') {
+    return `${prefix}${ANSI.cyan}${ANSI.dim}${data}${ANSI.reset}`
+  }
+  const colored = (data || '').
+    replace(/(\[.*?\/INFO\]:)/g, `${ANSI.green}$1${ANSI.reset}`).
+    replace(/(\[.*?\/WARN\]:)/g, `${ANSI.yellow}$1${ANSI.reset}`).
+    replace(/(\[.*?\/ERROR\]:)/g, `${ANSI.red}$1${ANSI.reset}`)
+  return `${prefix}${ANSI.white}${colored}${ANSI.reset}`
+}
 
-  const [servers, setServers]       = useState([])
-  const [loading, setLoading]       = useState(true)
-  const [toasts, dispatchToast]     = useReducer(toastReducer, [])
+function wsBaseUrl() {
+  if (import.meta.env.VITE_WS_URL) return import.meta.env.VITE_WS_URL
+  const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+  return `${proto}//${window.location.host}/ws`
+}
 
-  const { isConnected, subscribe, unsubscribe, sendCommand, logs, serverStatus } = useWebSocket()
+export default function ConsolePage({ serverId, navigate }) {
+  const termRef = React.useRef(null)
+  const xtermRef = React.useRef(null)
+  const fitRef = React.useRef(null)
+  const wsRef = React.useRef(null)
+  const mountedRef = React.useRef(true)
 
-  // Fetch server list for sidebar
-  useEffect(() => {
-    const fetchServers = async () => {
-      try {
-        const res  = await fetch('/api/servers')
-        if (!res.ok) throw new Error('Failed to fetch servers')
-        const data = await res.json()
-        setServers(data.data || data)
-      } catch (err) {
-        dispatchToast({ type: 'ADD', payload: { type: 'error', message: err.message } })
-      } finally {
-        setLoading(false)
-      }
-    }
-    fetchServers()
-    const id = setInterval(fetchServers, 30000)
-    return () => clearInterval(id)
-  }, [])
+  const [cmdInput, setCmdInput] = React.useState('')
+  const [history, setHistory] = React.useState([])
+  const [histIdx, setHistIdx] = React.useState(-1)
+  const [wsStatus, setWsStatus] = React.useState('connecting')
+  const [serverName, setServerName] = React.useState(serverId)
+  const inputRef = React.useRef(null)
 
-  // Subscribe/unsubscribe on route change
-  useEffect(() => {
-    if (!urlServerId) return
-    subscribe(urlServerId)
-    return () => unsubscribe(urlServerId)
-  }, [urlServerId, subscribe, unsubscribe])
+  React.useEffect(() => {
+    apiFetch(`/servers/${serverId}`)
+      .then(res => { if (res.data?.name) setServerName(res.data.name) })
+      .catch(() => {})
+  }, [serverId])
 
-  // Auto-dismiss toasts
-  useEffect(() => {
-    toasts.forEach(toast => {
-      if (toast.duration !== false) {
-        const t = setTimeout(
-          () => dispatchToast({ type: 'REMOVE', payload: toast.id }),
-          toast.duration || 4000,
-        )
-        return () => clearTimeout(t)
-      }
+  React.useEffect(() => {
+    if (!termRef.current) return
+    const term = new Terminal({
+      theme: {
+        background: '#0d1117',
+        foreground: '#e6edf3',
+        cursor: '#e6edf3',
+        black: '#161b22',
+        brightBlack: '#484f58',
+        white: '#e6edf3',
+        brightWhite: '#ffffff',
+        red: '#f85149',
+        brightRed: '#f85149',
+        green: '#3fb950',
+        brightGreen: '#56d364',
+        yellow: '#d29922',
+        brightYellow: '#e3b341',
+        blue: '#388bfd',
+        brightBlue: '#79c0ff',
+        cyan: '#39c5cf',
+        brightCyan: '#56d4dd',
+      },
+      fontFamily: "'JetBrains Mono', 'Cascadia Code', 'Fira Code', monospace",
+      fontSize: 13,
+      lineHeight: 1.5,
+      cursorStyle: 'bar',
+      cursorBlink: false,
+      scrollback: 2000,
+      convertEol: true,
+      disableStdin: true,
     })
-  }, [toasts])
 
-  const handleSelectServer = useCallback((id) => navigate(`/console/${id}`), [navigate])
+    term.open(termRef.current)
+    xtermRef.current = term
 
-  const handleSendCommand = useCallback((command) => {
-    if (!urlServerId || !isConnected) {
-      dispatchToast({ type: 'ADD', payload: { type: 'warning', message: 'Not connected to server' } })
-      return
+    const fit = new FitAddon()
+    term.loadAddon(fit)
+    fitRef.current = fit
+    setTimeout(() => fit.fit(), 100)
+
+    const ro = new ResizeObserver(() => fitRef.current?.fit())
+    ro.observe(termRef.current)
+
+    return () => {
+      mountedRef.current = false
+      ro.disconnect()
+      term.dispose()
+      xtermRef.current = null
     }
-    sendCommand(urlServerId, command)
-  }, [urlServerId, isConnected, sendCommand])
+  }, [serverId])
 
-  const selectedServer = servers.find(s => s.id === urlServerId)
-  const currentStatus  = urlServerId ? serverStatus[urlServerId] : undefined
+  React.useEffect(() => {
+    mountedRef.current = true
+    let ws = null
+    let reconnectTimer = null
+    let backoff = 1000
 
-  // No id → show empty state
-  if (!urlServerId) {
-    return (
-      <div style={{ display: 'flex', height: '100%' }}>
-        <Sidebar
-          servers={servers}
-          selectedServerId={null}
-          onSelectServer={handleSelectServer}
-          loading={loading}
-        />
-        <div style={{
-          flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
-          background: C.bg, borderLeft: `1px solid ${C.border}`,
-          color: C.dim, fontSize: 13,
-        }}>
-          Select a server to view its console
-        </div>
-      </div>
-    )
+    function writeLine(entry) {
+      if (xtermRef.current) {
+        xtermRef.current.writeln(formatLogLine(entry))
+      }
+    }
+
+    function connect() {
+      if (!mountedRef.current) return
+      setWsStatus('connecting')
+      ws = new WebSocket(wsBaseUrl())
+      wsRef.current = ws
+
+      ws.onopen = () => {
+        if (!mountedRef.current) return ws.close()
+        backoff = 1000
+        ws.send(JSON.stringify({ action: 'subscribe', serverId }))
+      }
+
+      ws.onmessage = (event) => {
+        if (!mountedRef.current) return
+        let msg
+        try { msg = JSON.parse(event.data) } catch { return }
+
+        if (msg.type === 'status') {
+          if (msg.data === 'subscribed') {
+            setWsStatus('connected')
+            writeLine({ type: 'system', data: `── YAMS Console · ${msg.server || serverId} ──`, timestamp: Date.now() })
+          } else if (msg.data === 'pending') {
+            setWsStatus('connecting')
+            writeLine({ type: 'system', data: 'Server is stopped — waiting for it to start…', timestamp: Date.now() })
+          } else if (msg.data === 'started') {
+            setWsStatus('connected')
+            writeLine({ type: 'system', data: '── Server started ──', timestamp: Date.now() })
+          } else if (msg.data === 'stopped') {
+            setWsStatus('lost')
+            writeLine({ type: 'system', data: '── Server stopped ──', timestamp: Date.now() })
+          }
+        } else if (msg.type === 'history') {
+          (msg.data || []).forEach(entry => writeLine(entry))
+        } else if (msg.type === 'stdout' || msg.type === 'stderr') {
+          writeLine(msg)
+        } else if (msg.type === 'error') {
+          writeLine({ type: 'system', data: `[error] ${msg.data}`, timestamp: Date.now() })
+        }
+      }
+
+      ws.onclose = () => {
+        if (!mountedRef.current) return
+        setWsStatus('lost')
+        reconnectTimer = setTimeout(connect, Math.min(backoff, 10000))
+        backoff = Math.min(backoff * 2, 10000)
+      }
+
+      ws.onerror = () => {
+        ws.close()
+      }
+    }
+
+    connect()
+
+    return () => {
+      mountedRef.current = false
+      clearTimeout(reconnectTimer)
+      if (ws) ws.close()
+    }
+  }, [serverId])
+
+  function sendCommand(cmd) {
+    const trimmed = cmd.trim()
+    if (!trimmed) return
+    setHistory(h => [trimmed, ...h].slice(0, 100))
+    setHistIdx(-1)
+    setCmdInput('')
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ action: 'command', serverId, command: trimmed }))
+    }
+    if (xtermRef.current) {
+      xtermRef.current.writeln(formatLogLine({ type: 'system', data: `> ${trimmed}`, timestamp: Date.now() }))
+    }
   }
 
+  function handleInputKey(e) {
+    if (e.key === 'Enter') {
+      sendCommand(cmdInput)
+    }
+    if (e.key === 'ArrowUp') {
+      e.preventDefault()
+      setHistIdx(i => {
+        const next = Math.min(i + 1, history.length - 1)
+        setCmdInput(history[next] || '')
+        return next
+      })
+    }
+    if (e.key === 'ArrowDown') {
+      e.preventDefault()
+      setHistIdx(i => {
+        const next = Math.max(i - 1, -1)
+        setCmdInput(next === -1 ? '' : history[next])
+        return next
+      })
+    }
+  }
+
+  const wsColor = wsStatus === 'connected' ? C.green : wsStatus === 'lost' ? C.red : C.amber
+  const wsLabel = wsStatus === 'connected' ? 'Connected' : wsStatus === 'lost' ? 'Disconnected' : 'Connecting…'
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      <StatusBar
-        server={selectedServer}
-        status={currentStatus}
-        wsConnected={isConnected}
-      />
-
-      <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
-        <Sidebar
-          servers={servers}
-          selectedServerId={urlServerId}
-          onSelectServer={handleSelectServer}
-          loading={loading}
-        />
-
-        <div style={{
-          flex: 1, display: 'flex', flexDirection: 'column',
-          background: C.bg, borderLeft: `1px solid ${C.border}`,
-        }}>
-          <Console logs={logs[urlServerId] || []} serverId={urlServerId} />
-          <CommandInput onSubmit={handleSendCommand} disabled={!isConnected} />
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: C.bg }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '0 24px', height: 48, flexShrink: 0, borderBottom: `1px solid ${C.border}`, background: C.surface }}>
+        <button
+          onClick={() => navigate('#/')}
+          style={{
+            background: 'none', border: 'none', color: C.muted,
+            cursor: 'pointer', fontSize: 13, padding: '4px 0',
+            display: 'flex', alignItems: 'center', gap: 6, transition: 'color 150ms',
+          }}
+          onMouseEnter={e => { e.currentTarget.style.color = C.text }}
+          onMouseLeave={e => { e.currentTarget.style.color = C.muted }}
+        >← Dashboard</button>
+        <div style={{ width: 1, height: 16, background: C.border }} />
+        <span style={{ fontSize: 14, fontWeight: 600, color: C.text }}>{serverName || 'Console'}</span>
+        <div style={{ flex: 1 }} />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: wsColor, fontWeight: 500 }}>
+          <span style={{ width: 7, height: 7, borderRadius: '50%', background: wsColor, boxShadow: wsStatus === 'connected' ? `0 0 6px ${C.green}88` : 'none', display: 'inline-block' }} />
+          {wsLabel}
         </div>
       </div>
 
-      {/* Toasts */}
-      <div style={{
-        position: 'fixed', top: 64, right: 16, zIndex: 50,
-        display: 'flex', flexDirection: 'column', gap: 8,
-      }}>
-        {toasts.map(toast => (
-          <Toast
-            key={toast.id}
-            type={toast.type}
-            message={toast.message}
-            onClose={() => dispatchToast({ type: 'REMOVE', payload: toast.id })}
+      <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+        <div ref={termRef} style={{ flex: 1, overflow: 'hidden', padding: '4px 4px 0 4px', background: C.bg }} />
+        <div style={{ flexShrink: 0, borderTop: `1px solid ${C.border}`, background: C.surface, display: 'flex', alignItems: 'center', opacity: wsStatus === 'connected' ? 1 : 0.5, transition: 'opacity 150ms' }}>
+          <span style={{ padding: '0 12px 0 16px', color: C.green, fontFamily: "'JetBrains Mono', monospace", fontSize: 13, fontWeight: 600, userSelect: 'none', flexShrink: 0 }}>&gt;</span>
+          <input
+            ref={inputRef}
+            type="text"
+            value={cmdInput}
+            onChange={e => setCmdInput(e.target.value)}
+            onKeyDown={handleInputKey}
+            placeholder="Enter command…"
+            disabled={wsStatus !== 'connected'}
+            autoComplete="off"
+            spellCheck={false}
+            style={{
+              flex: 1, background: 'none', border: 'none', outline: 'none',
+              color: C.text, fontFamily: "'JetBrains Mono', monospace",
+              fontSize: 13, padding: '12px 0', caretColor: C.green,
+            }}
           />
-        ))}
+          <button
+            onClick={() => sendCommand(cmdInput)}
+            disabled={wsStatus !== 'connected' || !cmdInput.trim()}
+            style={{
+              background: 'none', border: 'none', borderLeft: `1px solid ${C.border}`,
+              color: cmdInput.trim() && wsStatus === 'connected' ? C.blue : C.dim,
+              padding: '0 16px', height: '100%', cursor: cmdInput.trim() && wsStatus === 'connected' ? 'pointer' : 'default',
+              fontSize: 12, fontWeight: 600, transition: 'color 150ms', flexShrink: 0, minHeight: 45,
+            }}
+          >Send</button>
+        </div>
       </div>
     </div>
   )

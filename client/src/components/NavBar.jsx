@@ -1,4 +1,4 @@
-import { NavLink } from 'react-router-dom'
+import { NavLink, Link } from 'react-router-dom'
 import { C } from '../styles/tokens'
 
 const navLinkStyle = (isActive) => ({
@@ -54,15 +54,21 @@ export default function NavBar() {
         v0.1.0
       </span>
 
-      {/* Avatar */}
-      <div style={{
-        width: 28, height: 28, borderRadius: '50%',
-        background: C.surface2, border: `1px solid ${C.border}`,
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        fontSize: 11, color: C.muted, cursor: 'default', flexShrink: 0,
-      }}>
-        A
-      </div>
+      {/* Avatar → account page */}
+      <Link to="/account" style={{ textDecoration: 'none' }}>
+        <div style={{
+          width: 28, height: 28, borderRadius: '50%',
+          background: C.surface2, border: `1px solid ${C.border}`,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          fontSize: 11, color: C.muted, cursor: 'pointer', flexShrink: 0,
+          transition: 'border-color 150ms',
+        }}
+          onMouseEnter={e => e.currentTarget.style.borderColor = C.muted}
+          onMouseLeave={e => e.currentTarget.style.borderColor = C.border}
+        >
+          A
+        </div>
+      </Link>
     </nav>
   )
 }
