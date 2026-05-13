@@ -11,6 +11,7 @@
  */
 
 const path = require('path');
+const fsp  = require('fs/promises');
 const { spawn } = require('child_process');
 const { EventEmitter } = require('events');
 const { v4: uuidv4 } = require('uuid');
@@ -646,13 +647,28 @@ function getServer(id) {
  * @param {string} serverId
  * @returns {import('child_process').ChildProcess | null}
  */
+/**
+ * Delete a server — removes the DB record and the server directory.
+ * Requires the server to be stopped.
+ * @param {string} id
+ */
+async function deleteServer(id) {
+  const server = getServer(id);
+  if (processes.has(id)) throw conflict('Stop the server before deleting it', 'SERVER_RUNNING');
+  serverModel.remove(id);
+  await fsp.rm(server.path, { recursive: true, force: true }).catch(err => {
+    console.error(`[YAMS] Could not remove server directory: ${err.message}`);
+  });
+  return server;
+}
+
 function getChildProcess(serverId) {
   const entry = processes.get(serverId);
   return entry ? entry.child : null;
 }
 
 module.exports = {
-  createServer, startServer, stopServer, listServers, getServer,
+  createServer, startServer, stopServer, deleteServer, listServers, getServer,
   subscribe, unsubscribe, sendCommand,
   getChildProcess,
   streamEmitter,

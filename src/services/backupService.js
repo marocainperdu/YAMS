@@ -8,35 +8,26 @@ const archiver  = require('archiver');
 const unzipper  = require('unzipper');
 
 const { badRequest, notFound, conflict, forbidden, internal } = require('../utils/errors');
+const { validateZipEntries, checkExtractedDir, extractToDir } = require('../utils/zipSecurity');
 
 const SERVERS_ROOT = process.env.YAMS_SERVERS_ROOT
   || path.join(__dirname, '..', '..', 'servers');
 
-// Minecraft world directories safe to remove during restore
-const WORLD_DIRS = ['world', 'world_nether', 'world_the_end'];
-
-// Directories excluded from backup archives
+// Directories excluded from backup archives (never backed up, never restored).
 const EXCLUDE_DIRS = new Set(['logs', 'crash-reports', 'backups']);
 
-// Server IDs currently being backed up — prevents concurrent backups per server
+// Server IDs currently being backed up — prevents concurrent backups per server.
 const activeBackups = new Set();
 
-// Server IDs currently being restored — prevents concurrent restores per server
+// Server IDs currently being restored — prevents concurrent restores per server.
 const activeRestores = new Set();
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // ─── Path helpers ─────────────────────────────────────────────────────────────
 
-/**
- * Validate serverPath stays within SERVERS_ROOT and return it resolved.
- * Accepts either a full path (from server.path in DB) or a bare serverId
- * (used by unit tests that call the service directly with TEST_ROOT).
- */
 function resolveServerRoot(serverPathOrId) {
   const root     = path.resolve(SERVERS_ROOT);
-  // If the caller passed an absolute path use it directly; otherwise treat as
-  // a relative id under SERVERS_ROOT (unit-test shorthand).
   const resolved = path.isAbsolute(serverPathOrId)
     ? path.resolve(serverPathOrId)
     : path.resolve(SERVERS_ROOT, serverPathOrId);
@@ -73,6 +64,19 @@ function formatDisplayName(mtimeMs) {
   return `backup-${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}-${pad(d.getHours())}-${pad(d.getMinutes())}.zip`;
 }
 
+// ─── Derive world directories from server.properties ─────────────────────────
+//
+// Reads level-name from server.properties (same logic as worldService.readLevelName,
+// shared via export).  Derives the three standard Minecraft world directories.
+// Falls back to 'world' if server.properties is absent or has no level-name key.
+
+async function _getWorldDirs(serverRoot) {
+  const { readLevelName } = require('./worldService');
+  const levelName = await readLevelName(serverRoot);
+  const base = levelName.trim() || 'world';
+  return [base, `${base}_nether`, `${base}_the_end`];
+}
+
 // ─── listBackups ──────────────────────────────────────────────────────────────
 
 async function listBackups(serverPathOrId) {
@@ -86,7 +90,7 @@ async function listBackups(serverPathOrId) {
 
   for (const file of files) {
     if (!file.endsWith('.zip') || file.endsWith('.tmp.zip')) continue;
-    const id = file.slice(0, -4); // strip .zip
+    const id = file.slice(0, -4);
     if (!UUID_RE.test(id)) continue;
 
     const filePath = path.join(backupsDir, file);
@@ -115,13 +119,14 @@ async function findBackup(serverPathOrId, backupId) {
 
 // ─── createBackup ─────────────────────────────────────────────────────────────
 
-/**
- * @param {string} serverId   UUID — used for concurrent-lock key
- * @param {string} serverPathOrId  Actual path to server directory (or bare id for unit tests)
- */
 async function createBackup(serverId, serverPathOrId) {
-  // Support unit-test shorthand: createBackup(id) with id == relative dir name
   const serverRoot = resolveServerRoot(serverPathOrId || serverId);
+
+  const serverModel = require('../models/serverModel');
+  const server = serverModel.findById(serverId);
+  if (server?.status === 'running') {
+    throw conflict('Stop the server before creating a backup', 'SERVER_RUNNING');
+  }
 
   if (activeRestores.has(serverId)) {
     throw conflict('A restore is in progress for this server; cannot create backup');
@@ -129,8 +134,6 @@ async function createBackup(serverId, serverPathOrId) {
   if (activeBackups.has(serverId)) {
     throw conflict('A backup is already in progress for this server');
   }
-  // Add synchronously before any await — eliminates the race window where two
-  // concurrent callers both pass the has() check before either runs add().
   activeBackups.add(serverId);
 
   let tmpPath;
@@ -204,17 +207,25 @@ async function streamBackup(serverPathOrId, backupId, res) {
 }
 
 // ─── restoreBackup ────────────────────────────────────────────────────────────
+//
+// Security improvements vs. the old implementation:
+//
+//   1. validateZipEntries — zip-slip, symlinks, dangerous extensions, declared-size
+//      bomb protection (same checks as worldService.importWorld).
+//   2. extractToDir — entry-by-entry with a Transform byte-counter (real-size
+//      bomb protection) and O_CREAT|O_EXCL|O_NOFOLLOW per-file write flags.
+//   3. checkExtractedDir — post-extraction lstat pass that rejects any symlinks
+//      or hardlinked files that bypassed ZIP metadata.
+//   4. Atomic restore — the archive is fully extracted into a temp dir before
+//      any live file is touched.  World directories are then swapped atomically
+//      (rename); non-world items are moved last.  On any failure the live
+//      directories are restored from .restore-bak copies.
+//   5. Dynamic world dirs — derived from server.properties level-name instead of
+//      the former hardcoded ['world', 'world_nether', 'world_the_end'] list.
 
-/**
- * @param {string} serverId       UUID — used for DB lookup and process check
- * @param {string} backupId       UUID of the backup to restore
- * @param {string} serverPathOrId Actual path to server directory (or bare id for unit tests)
- */
 async function restoreBackup(serverId, backupId, serverPathOrId) {
   const serverRoot = resolveServerRoot(serverPathOrId || serverId);
 
-  // Prevent concurrent restores, and block restore while a backup is in progress.
-  // All checks must happen before the first await to eliminate the JS race window.
   if (activeBackups.has(serverId)) {
     throw conflict('A backup is in progress for this server; cannot restore');
   }
@@ -223,47 +234,42 @@ async function restoreBackup(serverId, backupId, serverPathOrId) {
   }
   activeRestores.add(serverId);
 
+  let tmpRestoreDir = null;
+
   try {
     const backup = await findBackup(serverRoot, backupId);
 
-    // Lazy-require to avoid circular dependency with serverService
+    // Lazy-require to avoid circular dependency with serverService.
     const serverModel = require('../models/serverModel');
     const server = serverModel.findById(serverId);
     if (!server) throw notFound('Server not found');
 
-    // 1. BUG 1 FIX: stop the server and wait for the real OS-level process exit.
-    //
-    //    stopServer() writes 'stopped' to the DB before the JVM exits, so polling
-    //    DB status exits the loop immediately while the JVM is still writing chunk
-    //    data.  Instead, we capture the ChildProcess reference BEFORE calling
-    //    stopServer() (which removes it from the processes Map), then await the
-    //    real 'exit' event that libuv emits only when the OS process has fully exited.
+    // Compute world dirs BEFORE stopping the server (reads current server.properties).
+    const worldDirNames = await _getWorldDirs(serverRoot);
+    const worldDirSet   = new Set(worldDirNames);
+
+    // Stop the server and wait for the real OS-level process exit.
     if (server.status === 'running') {
       const { stopServer, getChildProcess } = require('./serverService');
-      const child = getChildProcess(serverId); // capture before stopServer clears the Map
+      const child = getChildProcess(serverId);
 
-      // Attach listener BEFORE sending the stop signal so the 'exit' event is
-      // never missed — required for correctness when stopServer() becomes async,
-      // or when EventEmitter mocks emit 'exit' synchronously in tests.
       let waitForExit = Promise.resolve();
       if (child) {
         waitForExit = new Promise((resolve, reject) => {
           const timeout = setTimeout(
             () => reject(internal('Server did not stop within 30 s; restore aborted')),
-            30_000
+            30_000,
           );
-          child.once('exit', () => {
-            clearTimeout(timeout);
-            resolve();
-          });
+          child.once('exit', () => { clearTimeout(timeout); resolve(); });
         });
       }
 
-      stopServer(serverId); // signal sent AFTER listener is attached
+      stopServer(serverId);
       await waitForExit;
     }
 
-    // 2. Validate archive integrity and guard against zip-slip — BEFORE any deletion
+    // ── 1. Open and validate archive ────────────────────────────────────────
+
     let zipDir;
     try {
       zipDir = await unzipper.Open.file(backup.filePath);
@@ -271,47 +277,77 @@ async function restoreBackup(serverId, backupId, serverPathOrId) {
       throw badRequest(`Invalid or corrupted zip archive: ${err.message}`);
     }
 
-    for (const file of zipDir.files) {
-      const normalized = path.normalize(file.path);
-      if (path.isAbsolute(normalized) || normalized.startsWith('..')) {
-        throw badRequest(`Unsafe path in archive: ${file.path}`);
-      }
-    }
+    validateZipEntries(zipDir.files);
 
-    // 3. Save world directories as .restore-bak before deletion so we can
-    //    roll back if extraction fails for any non-zip reason (disk full, I/O error).
+    // ── 2. Extract to temp dir (no live files touched yet) ──────────────────
+
+    tmpRestoreDir = path.join(serverRoot, `.tmp-restore-${uuidv4()}`);
+    await fsp.mkdir(tmpRestoreDir, { recursive: true });
+    await extractToDir(zipDir, tmpRestoreDir);
+
+    // Post-extraction integrity: symlinks / hardlinks that bypassed ZIP metadata.
+    await checkExtractedDir(tmpRestoreDir);
+
+    // ── 3. Atomic world-dir swap ─────────────────────────────────────────────
+    //
+    // Save live world dirs as .restore-bak before removing them so we can roll
+    // back if the subsequent merge step fails.
+
     const savedWorlds = [];
-    for (const worldDir of WORLD_DIRS) {
-      const worldPath = path.join(serverRoot, worldDir);
-      if (!worldPath.startsWith(serverRoot + path.sep)) continue;
-      const bakPath = `${worldPath}.restore-bak`;
+    for (const wd of worldDirNames) {
+      const live = path.join(serverRoot, wd);
+      // Path-confinement guard — level-name could theoretically contain traversal.
+      if (!live.startsWith(serverRoot + path.sep)) continue;
+      const bak = `${live}.restore-bak`;
       try {
-        await fsp.access(worldPath);
-        await fsp.rm(bakPath, { recursive: true, force: true }); // remove stale bak if present
-        await fsp.rename(worldPath, bakPath);
-        savedWorlds.push({ worldPath, bakPath });
-      } catch { /* world dir does not exist — nothing to save */ }
+        await fsp.access(live);
+        await fsp.rm(bak, { recursive: true, force: true });
+        await fsp.rename(live, bak);
+        savedWorlds.push({ live, bak });
+      } catch { /* world dir absent in live server — nothing to save */ }
     }
 
-    // 4. Extract backup into server root; roll back on failure
     try {
-      await zipDir.extract({ path: serverRoot, concurrency: 5 });
-      // Success: remove the .restore-bak safety copies
-      for (const { bakPath } of savedWorlds) {
-        await fsp.rm(bakPath, { recursive: true, force: true }).catch(() => {});
+      // Move all items from the temp dir into the live server root.
+      // World dirs: destination is already gone (renamed to .restore-bak above),
+      //   so rename() is atomic.
+      // Non-world dirs: remove destination first (overwrite), then rename().
+      // Files: rename() overwrites atomically on Linux.
+      const tmpEntries = await fsp.readdir(tmpRestoreDir, { withFileTypes: true });
+      for (const entry of tmpEntries) {
+        // Never overwrite or create backups / logs inside the live root from a restore.
+        if (EXCLUDE_DIRS.has(entry.name)) continue;
+
+        const src = path.join(tmpRestoreDir, entry.name);
+        const dst = path.join(serverRoot, entry.name);
+
+        // Final confinement check.
+        if (!dst.startsWith(serverRoot + path.sep) && dst !== serverRoot) continue;
+
+        if (entry.isDirectory() && !worldDirSet.has(entry.name)) {
+          // Remove existing non-world directory before rename (rename fails if dst exists).
+          await fsp.rm(dst, { recursive: true, force: true }).catch(() => {});
+        }
+        await fsp.rename(src, dst);
+      }
+
+      // Success — discard the .restore-bak safety copies.
+      for (const { bak } of savedWorlds) {
+        await fsp.rm(bak, { recursive: true, force: true }).catch(() => {});
       }
     } catch (err) {
-      // Roll back: restore the saved world directories
-      for (const { worldPath, bakPath } of savedWorlds) {
-        try {
-          await fsp.rm(worldPath, { recursive: true, force: true });
-          await fsp.rename(bakPath, worldPath);
-        } catch { /* best-effort rollback */ }
+      // Merge failed — restore the world dirs from .restore-bak.
+      for (const { live, bak } of savedWorlds) {
+        await fsp.rm(live, { recursive: true, force: true }).catch(() => {});
+        await fsp.rename(bak, live).catch(() => {});
       }
-      throw internal(`Extraction failed: ${err.message}`);
+      throw internal(`Restore merge failed: ${err.message}`);
     }
   } finally {
     activeRestores.delete(serverId);
+    if (tmpRestoreDir) {
+      await fsp.rm(tmpRestoreDir, { recursive: true, force: true }).catch(() => {});
+    }
   }
 }
 

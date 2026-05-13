@@ -1,26 +1,23 @@
 'use strict';
 
-const { Router }                  = require('express');
-const controller                  = require('../controllers/serverController');
-const metricsController           = require('../controllers/metricsController');
-const jarController               = require('../controllers/jarController');
-const { authMiddleware }          = require('../middleware/authMiddleware');
-const { requireServerPermission } = require('../middleware/permissionMiddleware');
+const { Router } = require('express');
+const controller = require('../controllers/serverController');
+const metricsController = require('../controllers/metricsController');
+const { heavyOpLimiter } = require('../middleware/rateLimits');
 
 const router = Router();
 
-// C4 — server creation now requires authentication
-router.post('/', authMiddleware, controller.create);
+// Collection
+router.post('/',  controller.create);   // POST /servers       — create a server
+router.get('/',   controller.list);     // GET  /servers       — list all servers
 
-// GET /servers — authentication required, no per-server permission check
-router.get('/', authMiddleware, controller.list);
+// Single resource
+router.get('/:id',        controller.getOne);  // GET    /servers/:id       — get one server
+router.delete('/:id',     controller.remove);  // DELETE /servers/:id       — delete a server
+router.post('/:id/start', heavyOpLimiter, controller.start);   // POST /servers/:id/start — start a server
+router.post('/:id/stop',  controller.stop);    // POST /servers/:id/stop  — stop a server
 
-// Per-server operations — authentication + explicit permission
-router.get('/:id',              authMiddleware, requireServerPermission('read'),    controller.getOne);
-router.post('/:id/start',       authMiddleware, requireServerPermission('control'), controller.start);
-router.post('/:id/stop',        authMiddleware, requireServerPermission('control'), controller.stop);
-router.get('/:id/metrics',      authMiddleware, requireServerPermission('read'),    metricsController.getOne);
-// C4 — JAR download requires control permission on the target server
-router.post('/:id/download-jar', authMiddleware, requireServerPermission('control'), jarController.downloadJar);
+// Metrics
+router.get('/:id/metrics', metricsController.getOne); // GET /servers/:id/metrics
 
 module.exports = router;

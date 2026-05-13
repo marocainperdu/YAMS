@@ -1,28 +1,25 @@
 'use strict';
 
-const { Router }         = require('express');
-const rateLimit          = require('express-rate-limit');
-const controller         = require('../controllers/authController');
-const { authMiddleware } = require('../middleware/authMiddleware');
-const twoFARoutes        = require('./twoFARoutes');
+const { Router } = require('express');
+const controller  = require('../controllers/authController');
+const { authMiddleware, requireAdmin } = require('../middleware/auth');
+const { authLimiter } = require('../middleware/rateLimits');
 
 const router = Router();
 
-// H1 — Rate-limit login: 20 attempts per 15 min per IP.
-// Skipped when auth is disabled (tests / dev without YAMS_AUTH_ENABLED).
-const loginLimiter = rateLimit({
-  windowMs:       15 * 60 * 1000,
-  max:            20,
-  standardHeaders: true,
-  legacyHeaders:  false,
-  skip:           () => !process.env.YAMS_AUTH_ENABLED,
-  message:        { error: 'Too many login attempts. Please try again later.' },
-});
+// POST /auth/login   — public, rate-limited
+router.post('/login',   authLimiter, controller.login);
 
-router.post('/login',     loginLimiter, controller.login);              // POST  /auth/login
-router.get('/me',         authMiddleware, controller.getMe);            // GET   /auth/me
-router.patch('/me',       authMiddleware, controller.updateMe);         // PATCH /auth/me
-router.patch('/password', authMiddleware, controller.changePassword);   // PATCH /auth/password
-router.use('/2fa',        twoFARoutes);                                 // /auth/2fa/*
+// POST /auth/refresh — public, rate-limited (refresh token in Authorization or body)
+router.post('/refresh', authLimiter, controller.refresh);
+
+// POST /auth/logout  — authenticated; revokes the provided refresh token
+router.post('/logout',  authMiddleware, controller.logout);
+
+// POST /auth/logout-all — authenticated; revokes all refresh tokens for the caller
+router.post('/logout-all', authMiddleware, controller.logoutAll);
+
+// POST /auth/register — admin only
+router.post('/register', authMiddleware, requireAdmin, controller.register);
 
 module.exports = router;

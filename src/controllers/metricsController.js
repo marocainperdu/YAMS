@@ -1,13 +1,16 @@
 'use strict';
 
 const metricsService = require('../services/metricsService');
-const { notFound }   = require('../utils/errors');
+const { notFound } = require('../utils/errors');
 
+/**
+ * GET /servers/:id/metrics
+ */
 async function getOne(req, res, next) {
   try {
-    const data = await metricsService.getMetrics(req.params.id);
-    if (!data) throw notFound(`Server '${req.params.id}' not found`);
-    res.json({ data });
+    const metrics = await metricsService.getServerMetrics(req.params.id);
+    if (!metrics) return next(notFound(`Server '${req.params.id}' not found`));
+    res.json({ data: metrics });
   } catch (err) {
     next(err);
   }

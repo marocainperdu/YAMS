@@ -1,186 +1,141 @@
 'use strict';
 
-const crypto    = require('crypto');
-const bcrypt    = require('bcryptjs');
-const jwt       = require('jsonwebtoken');
-const userModel = require('../models/userModel');
-const { badRequest, conflict, unauthorized, notFound } = require('../utils/errors');
+const crypto  = require('crypto');
+const bcrypt  = require('bcryptjs');
+const jwt     = require('jsonwebtoken');
+const { v4: uuidv4 } = require('uuid');
 
-// C1 — Fail-fast: JWT_SECRET is mandatory when auth is enabled
-if (process.env.YAMS_AUTH_ENABLED && !process.env.JWT_SECRET) {
-  throw new Error('[YAMS] FATAL: YAMS_AUTH_ENABLED requires JWT_SECRET to be set.');
+const userModel         = require('../models/userModel');
+const refreshTokenModel = require('../models/refreshTokenModel');
+const { unauthorized, conflict, badRequest } = require('../utils/errors');
+
+const BCRYPT_ROUNDS        = 12;
+const ACCESS_TOKEN_TTL     = '15m';
+const REFRESH_TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+
+function jwtSecret() {
+  const s = process.env.JWT_SECRET;
+  if (!s) throw new Error('[YAMS] JWT_SECRET is not set');
+  return s;
 }
 
-const JWT_SECRET  = process.env.JWT_SECRET || 'dev-secret-unused';
-const JWT_EXPIRY  = '7d';
-const SALT_ROUNDS = 10;
-const EMAIL_RE    = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
-// C3 — TOTP brute-force: in-memory per-user lockout
-const totpLockouts     = new Map(); // userId -> { attempts, lockedUntil }
-const TOTP_MAX_ATTEMPTS = 5;
-const TOTP_LOCKOUT_MS   = 15 * 60 * 1000;
-
-// ── Public API ────────────────────────────────────────────────────────────────
-
-async function createUser({ email, password, role = 'user' }) {
-  if (!email || !EMAIL_RE.test(email))         throw badRequest('A valid email is required');
-  if (!password || password.length < 6)        throw badRequest('Password must be at least 6 characters');
-  if (!['admin', 'user'].includes(role))       throw badRequest('Role must be "admin" or "user"');
-
-  const normalised = email.toLowerCase();
-  if (userModel.findByEmail(normalised))       throw conflict('Email already in use');
-
-  const passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
-  const user = userModel.create({ email: normalised, passwordHash, role });
-  return { id: user.id, email: user.email, role: user.role };
+function hashToken(raw) {
+  return crypto.createHash('sha256').update(raw).digest('hex');
 }
 
-async function login({ email, password, totpCode }) {
-  if (!email || !password) throw badRequest('Email and password are required');
-
-  const user = userModel.findByEmail(email.toLowerCase());
-  if (!user) throw unauthorized('Invalid credentials');
-
-  const match = await bcrypt.compare(password, user.password_hash);
-  if (!match) throw unauthorized('Invalid credentials');
-
-  if (user.totp_enabled) {
-    if (!totpCode) return { requiresTOTP: true };
-
-    // C3 — lockout check before attempting TOTP verification
-    const lockout = totpLockouts.get(user.id);
-    if (lockout && Date.now() < lockout.lockedUntil) {
-      throw unauthorized('Too many failed attempts. Try again later.');
-    }
-
-    const { verifyCode } = require('./twoFAService');
-    if (!verifyCode(user, String(totpCode))) {
-      const entry = totpLockouts.get(user.id) || { attempts: 0, lockedUntil: 0 };
-      entry.attempts += 1;
-      if (entry.attempts >= TOTP_MAX_ATTEMPTS) {
-        entry.lockedUntil = Date.now() + TOTP_LOCKOUT_MS;
-      }
-      totpLockouts.set(user.id, entry);
-      throw unauthorized('Invalid authenticator code');
-    }
-
-    totpLockouts.delete(user.id);
-  }
-
-  // C2 — restricted scope for accounts that must change their password
-  const scope     = user.must_change_password === 1 ? 'change_password' : 'full';
-  const expiresIn = user.must_change_password === 1 ? '1h' : JWT_EXPIRY;
-  const token     = jwt.sign(
-    { userId: user.id, role: user.role, scope },
-    JWT_SECRET,
-    { expiresIn, algorithm: 'HS256' }
+function issueAccessToken(user) {
+  return jwt.sign(
+    { userId: user.id, role: user.role, tokenVersion: user.token_version },
+    jwtSecret(),
+    { algorithm: 'HS256', expiresIn: ACCESS_TOKEN_TTL }
   );
-  return { token, forcePasswordChange: user.must_change_password === 1, username: user.username ?? null };
 }
 
-async function getMe(userId) {
-  const user = userModel.findById(userId);
-  if (!user) throw notFound('User not found');
-  return { id: user.id, email: user.email, username: user.username ?? null, role: user.role, created_at: user.created_at, totpEnabled: user.totp_enabled === 1 };
+function issueRefreshToken(userId) {
+  const raw       = crypto.randomBytes(32).toString('hex');
+  const tokenHash = hashToken(raw);
+  const expiresAt = Date.now() + REFRESH_TOKEN_TTL_MS;
+  refreshTokenModel.create({ id: uuidv4(), userId, tokenHash, expiresAt });
+  return raw;
 }
 
-async function updateMe(userId, { username, email } = {}) {
-  const user = userModel.findById(userId);
-  if (!user) throw notFound('User not found');
+// ─── register ────────────────────────────────────────────────────────────────
 
-  let newEmail    = user.email;
-  let newUsername = user.username ?? null;
+async function register(username, password, role = 'operator') {
+  if (!username || typeof username !== 'string' || username.trim().length < 3) {
+    throw badRequest('Username must be at least 3 characters', 'INVALID_USERNAME');
+  }
+  if (!password || typeof password !== 'string' || password.length < 8) {
+    throw badRequest('Password must be at least 8 characters', 'INVALID_PASSWORD');
+  }
+  const validRoles = new Set(['admin', 'operator', 'user']);
+  if (!validRoles.has(role)) {
+    throw badRequest('Invalid role', 'INVALID_ROLE');
+  }
+  if (userModel.findByUsername(username.trim())) {
+    throw conflict('Username already exists', 'USERNAME_TAKEN');
+  }
+  const passwordHash = await bcrypt.hash(password, BCRYPT_ROUNDS);
+  const user = userModel.create({ id: uuidv4(), username: username.trim(), passwordHash, role });
+  return { id: user.id, username: user.username, role: user.role };
+}
 
-  if (email !== undefined) {
-    const trimmed = String(email).toLowerCase().trim();
-    if (!EMAIL_RE.test(trimmed)) throw badRequest('A valid email is required');
-    const taken = userModel.findByEmail(trimmed);
-    if (taken && taken.id !== userId) throw conflict('Email already in use');
-    newEmail = trimmed;
+// ─── login ───────────────────────────────────────────────────────────────────
+
+async function login(username, password) {
+  if (!username || !password) {
+    throw badRequest('Username and password are required', 'MISSING_CREDENTIALS');
   }
 
-  if (username !== undefined) {
-    const trimmed = String(username).trim();
-    if (trimmed.length === 0 || trimmed.length > 64) throw badRequest('Username must be between 1 and 64 characters');
-    newUsername = trimmed;
+  const user = userModel.findByUsername(username);
+
+  // Always run bcrypt compare to prevent timing oracle even when user is missing.
+  // Use a dummy hash so the compare always takes the same time.
+  const dummyHash = '$2a$12$aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.';
+  const passwordHash = user ? user.password_hash : dummyHash;
+  const match = await bcrypt.compare(password, passwordHash);
+
+  if (!user || !match) {
+    throw unauthorized('Invalid credentials', 'INVALID_CREDENTIALS');
   }
 
-  userModel.updateProfile(userId, { email: newEmail, username: newUsername });
-  return { id: user.id, email: newEmail, username: newUsername, role: user.role };
+  // Opportunistically prune stale tokens on login
+  refreshTokenModel.purgeStale();
+
+  const accessToken  = issueAccessToken(user);
+  const refreshToken = issueRefreshToken(user.id);
+  return { accessToken, refreshToken };
 }
 
-async function changePassword(userId, { currentPassword, newPassword }) {
-  if (!currentPassword)                        throw badRequest('Current password is required');
-  if (!newPassword || newPassword.length < 8)  throw badRequest('New password must be at least 8 characters');
+// ─── refresh ─────────────────────────────────────────────────────────────────
 
-  const user = userModel.findById(userId);
-  if (!user) throw notFound('User not found');
+async function refresh(rawToken) {
+  if (!rawToken) throw unauthorized('Refresh token is required', 'MISSING_TOKEN');
 
-  const match = await bcrypt.compare(currentPassword, user.password_hash);
-  if (!match) throw unauthorized('Current password is incorrect');
+  const tokenHash = hashToken(rawToken);
+  const record    = refreshTokenModel.findByHash(tokenHash);
 
-  const newHash = await bcrypt.hash(newPassword, SALT_ROUNDS);
-  userModel.updatePassword(userId, newHash);
+  if (!record) throw unauthorized('Invalid refresh token', 'INVALID_TOKEN');
+  if (record.revoked)             throw unauthorized('Refresh token has been revoked', 'TOKEN_REVOKED');
+  if (record.expires_at < Date.now()) throw unauthorized('Refresh token has expired', 'TOKEN_EXPIRED');
+
+  const user = userModel.findById(record.user_id);
+  if (!user) throw unauthorized('User not found', 'USER_NOT_FOUND');
+
+  // Rotation: revoke consumed token, issue new pair
+  refreshTokenModel.revoke(tokenHash);
+  const accessToken     = issueAccessToken(user);
+  const newRefreshToken = issueRefreshToken(user.id);
+  return { accessToken, refreshToken: newRefreshToken };
 }
 
-// H4 — pin algorithm to HS256 to prevent confusion attacks
-function verifyToken(token) {
-  try {
-    return jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'] });
-  } catch {
-    return null;
-  }
+// ─── logout ──────────────────────────────────────────────────────────────────
+
+function logout(rawToken) {
+  if (!rawToken) return;
+  refreshTokenModel.revoke(hashToken(rawToken));
 }
 
-// ── Startup seeding ───────────────────────────────────────────────────────────
+// ─── logoutAll ───────────────────────────────────────────────────────────────
+// Increments token_version so all outstanding access tokens are immediately
+// rejected by authMiddleware — even before their 15-minute TTL expires.
 
-function generateSecurePassword() {
-  const upper   = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
-  const lower   = 'abcdefghijklmnopqrstuvwxyz';
-  const digits  = '0123456789';
-  const symbols = '!@#$%^&*()-_=+[]{}|;:,.<>?';
-  const all     = upper + lower + digits + symbols;
-
-  const required = [
-    upper[crypto.randomInt(upper.length)],
-    lower[crypto.randomInt(lower.length)],
-    digits[crypto.randomInt(digits.length)],
-    symbols[crypto.randomInt(symbols.length)],
-  ];
-  const rest = Array.from({ length: 12 }, () => all[crypto.randomInt(all.length)]);
-
-  const chars = [...required, ...rest];
-  for (let i = chars.length - 1; i > 0; i--) {
-    const j = crypto.randomInt(i + 1);
-    [chars[i], chars[j]] = [chars[j], chars[i]];
-  }
-  return chars.join('');
+function logoutAll(userId) {
+  userModel.incrementTokenVersion(userId);
+  refreshTokenModel.revokeAll(userId);
 }
 
-function seedAdminIfEmpty() {
-  if (!process.env.YAMS_AUTH_ENABLED) return;
+// ─── seedAdmin ───────────────────────────────────────────────────────────────
+// Called once at startup when YAMS_ADMIN_USERNAME / YAMS_ADMIN_PASSWORD are set
+// and no users exist yet. Safe to call every boot — no-op if users already exist.
+
+async function seedAdmin() {
+  const username = process.env.YAMS_ADMIN_USERNAME;
+  const password = process.env.YAMS_ADMIN_PASSWORD;
+  if (!username || !password) return;
   if (userModel.count() > 0) return;
-
-  const email    = process.env.YAMS_ADMIN_EMAIL || 'admin@yams.local';
-  const provided = process.env.YAMS_ADMIN_PASSWORD;
-  const password = provided || generateSecurePassword();
-
-  const passwordHash = bcrypt.hashSync(password, SALT_ROUNDS);
-  userModel.create({ email, passwordHash, role: 'admin', mustChangePassword: !provided });
-
-  if (!provided) {
-    console.log('========================================');
-    console.log(' YAMS INITIAL ADMIN ACCOUNT CREATED');
-    console.log('----------------------------------------');
-    console.log(` Username: ${email}`);
-    console.log(` Password: ${password}`);
-    console.log('----------------------------------------');
-    console.log(' You MUST change this password on first login.');
-    console.log('========================================');
-  } else {
-    console.log(`[YAMS] Seeded default admin: ${email}`);
-  }
+  await register(username, password, 'admin');
+  console.log(`[YAMS] Admin user '${username}' created.`);
 }
 
-module.exports = { createUser, login, getMe, updateMe, changePassword, verifyToken, seedAdminIfEmpty };
+module.exports = { register, login, refresh, logout, logoutAll, seedAdmin };

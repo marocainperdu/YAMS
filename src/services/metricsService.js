@@ -1,454 +1,424 @@
 'use strict';
 
+const fs = require('fs');
+const fsp = require('fs/promises');
 const path = require('path');
-const fsp  = require('fs/promises');
-const os   = require('os');
 
 const serverModel = require('../models/serverModel');
 
-// ─── Platform guard ───────────────────────────────────────────────────────────
-const IS_LINUX = os.platform() === 'linux';
+// Lazily required to avoid circular dependency (serverService → metricsService would be circular).
+// We call require() inside init() and getServerMetrics(), not at module top-level.
+let _streamEmitter = null;
+let _sendCommand = null;
+let _getMetricsSnapshot = null;
 
-// ─── Tuning constants ─────────────────────────────────────────────────────────
-const DISK_CACHE_TTL     = 60_000;  // ms — recompute disk sizes every 60 s
-const SAMPLE_INTERVAL_MS =  5_000;  // ms — CPU/RAM sample cadence
-const TPS_TIMEOUT_MS     = 30_000;  // ms — mark TPS unavailable after no reply
+function _requireServerService() {
+  if (_streamEmitter) return;
+  const svc = require('./serverService');
+  _streamEmitter = svc.streamEmitter;
+  _sendCommand = svc.sendCommand;
+  _getMetricsSnapshot = svc.getMetricsSnapshot;
+}
 
-// ─── Per-server in-memory caches ──────────────────────────────────────────────
-/** serverId → { pid, cpu, ram, threads, sampledAt } */
+// ─── In-memory caches ────────────────────────────────────────────────────────
+
+// Map<serverId, { cpu: number|null, ramUsedMb: number|null, ramMaxMb: number|null, threads: number|null, sampledAt: number }>
 const processCache = new Map();
-/** serverId → { m1, m5, m15, available, updatedAt } */
-const tpsCache     = new Map();
-/** serverId → { online: Set<string>, max: number, updatedAt: number } */
-const playerCache  = new Map();
-/** serverId → { root, backups, worlds, sampledAt } */
-const diskCache    = new Map();
 
-// ─── Internal sampler state ───────────────────────────────────────────────────
-const samplerIntervals = new Map();  // serverId → IntervalId
-const tpsTimeouts      = new Map();  // serverId → TimeoutId
-const prevCpuStats     = new Map();  // serverId → { utime, stime, total }
-/** servers that have logged "Done (Xs)!" — i.e. fully started */
-const serverDoneSet    = new Set();
-/** in-flight disk scans: serverId → Promise — prevents concurrent scans */
-const diskScans        = new Map();
+// Map<serverId, { tps1m, tps5m, tps15m, available: true, updatedAt: number }>
+const tpsCache = new Map();
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Pure parsers — exported for unit testing
-// ─────────────────────────────────────────────────────────────────────────────
+// Map<serverId, { online: number, max: number }>
+const playerCache = new Map();
 
-/**
- * Parse Paper/Spigot TPS from a log line.
- * "TPS from last 1m, 5m, 15m: 20.0, 20.0, 19.95"
- * @returns {{ m1: number, m5: number, m15: number } | null}
- */
-function parseTps(line) {
-  if (typeof line !== 'string') return null;
-  const m = line.match(
-    /TPS from last 1m, 5m, 15m:\s*([\d.]+),\s*([\d.]+),\s*([\d.]+)/
-  );
+// Map<serverId, { serverFolderMb, backupsMb, worldsMb, updatedAt: number }>
+const diskCache = new Map();
+
+// Map<serverId, NodeJS.Timeout> — one interval per running server
+const samplerIntervals = new Map();
+
+// Map<serverId, number> — epoch ms when first log line arrived (uptime approximation)
+const serverUptimes = new Map();
+
+// Map<serverId, number> — last time 'tps' command was sent (anti-spam)
+const lastTpsCommand = new Map();
+
+// Map<serverId, number> — last time 'list' command was sent
+const lastListCommand = new Map();
+
+// Set<serverId> — servers that have not responded to 'tps' within TPS_GIVE_UP_MS
+const tpsUnavailable = new Set();
+
+// ─── Constants ───────────────────────────────────────────────────────────────
+
+const SAMPLER_INTERVAL_MS   = 5_000;   // Background CPU/RAM poll cadence
+const TPS_ANTI_SPAM_MS      = 8_000;   // Min gap between 'tps' injections per server
+const TPS_STALE_MS          = 30_000;  // TPS cache considered stale after 30 s
+const TPS_GIVE_UP_MS        = 30_000;  // Stop trying tps if no response in 30 s
+const DISK_CACHE_TTL_MS     = 60_000;  // Disk scan TTL
+
+// ─── Regex ───────────────────────────────────────────────────────────────────
+
+// Paper/Spigot: asterisk is optional (added when TPS is capped at 20)
+const TPS_RE     = /TPS from last 1m, 5m, 15m: \*?([\d.]+), \*?([\d.]+), \*?([\d.]+)/;
+const JOIN_RE_1  = /\w+\[.+\] logged in with entity id/;
+const JOIN_RE_2  = /\]: \w+ joined the game/;
+const LEAVE_RE_1 = /\]: \w+ left the game/;
+const LEAVE_RE_2 = /\]: \w+ lost connection/;
+const LIST_RE    = /There are (\d+) of a max of (\d+) players online/;
+const DONE_RE    = /Done \([\d.]+s\)!/;
+
+// ─── Pure parsing helpers (exported with _ prefix for unit tests) ─────────────
+
+function _parseTps(line) {
+  const m = TPS_RE.exec(line);
   if (!m) return null;
-  return { m1: parseFloat(m[1]), m5: parseFloat(m[2]), m15: parseFloat(m[3]) };
+  return { tps1m: parseFloat(m[1]), tps5m: parseFloat(m[2]), tps15m: parseFloat(m[3]) };
 }
 
-/**
- * Parse player join from a log line.
- * "Steve joined the game"
- * @returns {string | null} Player name, or null
- */
-function parsePlayerJoin(line) {
-  if (typeof line !== 'string') return null;
-  const m = line.match(/^(.+) joined the game$/m);
-  return m ? m[1].trim() : null;
+function _parsePlayerEvent(line) {
+  if (JOIN_RE_1.test(line) || JOIN_RE_2.test(line)) return 'join';
+  if (LEAVE_RE_1.test(line) || LEAVE_RE_2.test(line)) return 'leave';
+  return null;
 }
 
-/**
- * Parse player leave from a log line.
- * "Alex left the game"
- * @returns {string | null} Player name, or null
- */
-function parsePlayerLeave(line) {
-  if (typeof line !== 'string') return null;
-  const m = line.match(/^(.+) left the game$/m);
-  return m ? m[1].trim() : null;
-}
-
-/**
- * Parse the Minecraft /list command response.
- * "There are 2 of a max of 20 players online: ..."
- * @returns {{ online: number, max: number } | null}
- */
-function parseListResponse(line) {
-  if (typeof line !== 'string') return null;
-  const m = line.match(/There are (\d+) of a max of (\d+) players online/);
+function _parseListResponse(line) {
+  const m = LIST_RE.exec(line);
   if (!m) return null;
   return { online: parseInt(m[1], 10), max: parseInt(m[2], 10) };
 }
 
-/**
- * Parse raw /proc/{pid}/status content into RSS and thread count.
- * @param {string} content
- * @returns {{ vmRss: number | null, threads: number | null }}
- */
-function parseProcStatus(content) {
-  let vmRss   = null;
-  let threads = null;
-  if (typeof content !== 'string') return { vmRss, threads };
-  for (const line of content.split('\n')) {
-    if (line.startsWith('VmRSS:')) {
-      const m = line.match(/(\d+)\s*kB/i);
-      if (m) vmRss = parseInt(m[1], 10) * 1024; // kB → bytes
-    } else if (line.startsWith('Threads:')) {
-      const m = line.match(/(\d+)/);
-      if (m) threads = parseInt(m[1], 10);
-    }
-  }
-  return { vmRss, threads };
+function _parseRamToMb(ramStr) {
+  if (!ramStr) return null;
+  const m = /^(\d+)(M|G)$/i.exec(ramStr);
+  if (!m) return null;
+  const val = parseInt(m[1], 10);
+  return m[2].toUpperCase() === 'G' ? val * 1024 : val;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// /proc readers (Linux-only, return null on other OS)
-// ─────────────────────────────────────────────────────────────────────────────
+// ─── /proc helpers (Linux-only, graceful fallback on ENOENT/non-Linux) ────────
 
-async function readProcStat(pid) {
-  if (!IS_LINUX) return null;
+function _readProcStat(pid) {
   try {
-    const content = await fsp.readFile(`/proc/${pid}/stat`, 'utf8');
-    const parts   = content.split(' ');
-    const utime   = parseInt(parts[13], 10);
-    const stime   = parseInt(parts[14], 10);
-    if (isNaN(utime) || isNaN(stime)) return null;
-    return { utime, stime };
+    const parts = fs.readFileSync(`/proc/${pid}/stat`, 'utf8').split(' ');
+    return { utime: parseInt(parts[13], 10), stime: parseInt(parts[14], 10) };
   } catch {
     return null;
   }
 }
 
-async function readGlobalCpu() {
-  if (!IS_LINUX) return null;
+function _readSysCpuTotal() {
   try {
-    const content = await fsp.readFile('/proc/stat', 'utf8');
-    const line    = content.split('\n')[0]; // "cpu  user nice system ..."
-    const values  = line.split(/\s+/).slice(1).map(Number);
-    return values.reduce((a, b) => a + b, 0);
+    const line = fs.readFileSync('/proc/stat', 'utf8').split('\n')[0];
+    return line.split(/\s+/).slice(1).reduce((acc, v) => acc + parseInt(v, 10), 0);
   } catch {
     return null;
   }
 }
 
-async function readProcStatusFile(pid) {
-  if (!IS_LINUX) return { vmRss: null, threads: null };
+function _readProcStatus(pid) {
   try {
-    const content = await fsp.readFile(`/proc/${pid}/status`, 'utf8');
-    return parseProcStatus(content);
+    const content = fs.readFileSync(`/proc/${pid}/status`, 'utf8');
+    const rss     = content.match(/VmRSS:\s+(\d+)\s+kB/)?.[1];
+    const threads = content.match(/Threads:\s+(\d+)/)?.[1];
+    return {
+      rssKb:   rss     ? parseInt(rss, 10)     : null,
+      threads: threads ? parseInt(threads, 10) : null,
+    };
   } catch {
-    return { vmRss: null, threads: null };
+    return null;
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Directory size (exported for unit testing)
-// ─────────────────────────────────────────────────────────────────────────────
+// ─── Disk helpers ─────────────────────────────────────────────────────────────
 
-/**
- * Recursively sum byte sizes of all files under dirPath.
- * Skips symlinks to avoid infinite loops.
- * Returns 0 if the directory does not exist or cannot be read.
- */
-async function dirSize(dirPath) {
+async function _calcDirSize(dirPath) {
+  let total = 0;
   try {
     const entries = await fsp.readdir(dirPath, { withFileTypes: true });
-    const sizes   = await Promise.all(
-      entries.map((entry) => {
-        if (entry.isSymbolicLink()) return 0;
-        const full = path.join(dirPath, entry.name);
-        if (entry.isDirectory()) return dirSize(full);
-        return fsp.stat(full).then((s) => s.size).catch(() => 0);
-      })
-    );
-    return sizes.reduce((acc, s) => acc + s, 0);
+    const sizes = await Promise.all(entries.map(async (entry) => {
+      const full = path.join(dirPath, entry.name);
+      if (entry.isDirectory()) return _calcDirSize(full);
+      if (entry.isFile()) {
+        try { return (await fsp.stat(full)).size; } catch { return 0; }
+      }
+      return 0;
+    }));
+    total = sizes.reduce((a, b) => a + b, 0);
   } catch {
-    return 0;
+    // Missing directory or permission error — return 0
   }
+  return total;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Background CPU/RAM sampler
-// ─────────────────────────────────────────────────────────────────────────────
+// ─── server.properties helpers ────────────────────────────────────────────────
 
-function startSampler(serverId) {
-  if (samplerIntervals.has(serverId)) return; // already running
+async function _readMaxPlayers(serverPath) {
+  const propsPath = path.join(serverPath, 'server.properties');
+  try {
+    const content = await fsp.readFile(propsPath, 'utf8');
+    for (const raw of content.split('\n')) {
+      const line = raw.replace(/\r$/, '');
+      if (!line.includes('=') || line.trimStart().startsWith('#')) continue;
+      const eq = line.indexOf('=');
+      if (line.slice(0, eq).trim() === 'max-players') {
+        const val = parseInt(line.slice(eq + 1).trim(), 10);
+        return isNaN(val) ? 20 : val;
+      }
+    }
+  } catch {
+    // file absent or unreadable — use Minecraft default
+  }
+  return 20;
+}
 
-  const id = setInterval(async () => {
+async function _readLevelName(serverPath) {
+  const propsPath = path.join(serverPath, 'server.properties');
+  try {
+    const content = await fsp.readFile(propsPath, 'utf8');
+    for (const raw of content.split('\n')) {
+      const line = raw.replace(/\r$/, '');
+      if (!line.includes('=') || line.trimStart().startsWith('#')) continue;
+      const eq = line.indexOf('=');
+      if (line.slice(0, eq).trim() === 'level-name') return line.slice(eq + 1);
+    }
+  } catch {
+    // fall through to default
+  }
+  return 'world';
+}
+
+// ─── Disk metrics (with 60 s TTL cache) ────────────────────────────────────────
+
+async function _getDiskMetrics(serverId, serverPath) {
+  const cached = diskCache.get(serverId);
+  if (cached && Date.now() - cached.updatedAt < DISK_CACHE_TTL_MS) {
+    return { serverFolderMb: cached.serverFolderMb, backupsMb: cached.backupsMb, worldsMb: cached.worldsMb };
+  }
+
+  const toMb = (bytes) => Math.round(bytes / 1024 / 1024 * 10) / 10;
+
+  const [totalBytes, backupBytes] = await Promise.all([
+    _calcDirSize(serverPath),
+    _calcDirSize(path.join(serverPath, 'backups')),
+  ]);
+
+  let worldsBytes = 0;
+  try {
+    const levelName = await _readLevelName(serverPath);
+    const worldDirs = [levelName, `${levelName}_nether`, `${levelName}_the_end`];
+    const sizes = await Promise.all(worldDirs.map(d => _calcDirSize(path.join(serverPath, d))));
+    worldsBytes = sizes.reduce((a, b) => a + b, 0);
+  } catch { /* non-critical */ }
+
+  const result = {
+    serverFolderMb: toMb(totalBytes),
+    backupsMb:      toMb(backupBytes),
+    worldsMb:       toMb(worldsBytes),
+    updatedAt:      Date.now(),
+  };
+  diskCache.set(serverId, result);
+  return { serverFolderMb: result.serverFolderMb, backupsMb: result.backupsMb, worldsMb: result.worldsMb };
+}
+
+// ─── TPS injection ─────────────────────────────────────────────────────────────
+
+function _maybeInjectTps(serverId) {
+  if (tpsUnavailable.has(serverId)) return;
+  const now = Date.now();
+  if (now - (lastTpsCommand.get(serverId) || 0) < TPS_ANTI_SPAM_MS) return;
+
+  // Give up if server has been running > TPS_GIVE_UP_MS with no TPS response
+  const uptime = serverUptimes.get(serverId);
+  if (uptime && !tpsCache.has(serverId) && Date.now() - uptime > TPS_GIVE_UP_MS) {
+    tpsUnavailable.add(serverId);
+    return;
+  }
+
+  try {
+    _sendCommand(serverId, 'tps');
+    lastTpsCommand.set(serverId, now);
+  } catch { /* server may have just stopped */ }
+}
+
+// ─── Background sampler ────────────────────────────────────────────────────────
+
+function _startSampler(serverId) {
+  if (samplerIntervals.has(serverId)) return;
+
+  let prevProc  = null;
+  let prevTotal = null;
+
+  const tick = () => {
     const server = serverModel.findById(serverId);
-    if (!server || server.status !== 'running' || !server.pid) {
-      stopSampler(serverId);
+    const pid = server?.pid;
+
+    if (!pid) {
+      processCache.set(serverId, { cpu: null, ramUsedMb: null, ramMaxMb: _parseRamToMb(server?.ram), threads: null, sampledAt: Date.now() });
       return;
     }
 
-    const pid = server.pid;
-    const [procStat, globalTotal] = await Promise.all([
-      readProcStat(pid),
-      readGlobalCpu(),
-    ]);
+    const procStat = _readProcStat(pid);
+    const sysTotal = _readSysCpuTotal();
+    const procStatus = _readProcStatus(pid);
 
     let cpu = null;
-    if (procStat && globalTotal !== null) {
-      const prev = prevCpuStats.get(serverId);
-      // First tick: store baseline, leave cpu = null
-      if (prev) {
-        const procDelta  = (procStat.utime + procStat.stime) - (prev.utime + prev.stime);
-        const totalDelta = globalTotal - prev.total;
-        // procDelta < 0 means PID was reused; totalDelta <= 0 is a clock oddity
-        if (totalDelta > 0 && procDelta >= 0) {
-          cpu = parseFloat(
-            Math.min(100, (procDelta / totalDelta) * 100).toFixed(2)
-          );
-        }
-      }
-      prevCpuStats.set(serverId, {
-        utime: procStat.utime,
-        stime: procStat.stime,
-        total: globalTotal,
-      });
+    if (procStat && sysTotal !== null && prevProc !== null && prevTotal !== null) {
+      const procDelta  = (procStat.utime + procStat.stime) - (prevProc.utime + prevProc.stime);
+      const totalDelta = sysTotal - prevTotal;
+      cpu = totalDelta > 0 ? Math.round((procDelta / totalDelta) * 100 * 100) / 100 : 0;
     }
 
-    const { vmRss, threads } = await readProcStatusFile(pid);
-    processCache.set(serverId, { pid, cpu, ram: vmRss, threads, sampledAt: Date.now() });
-  }, SAMPLE_INTERVAL_MS);
+    prevProc  = procStat;
+    prevTotal = sysTotal;
 
-  samplerIntervals.set(serverId, id);
-}
+    processCache.set(serverId, {
+      cpu,
+      ramUsedMb: procStatus?.rssKb ? Math.round(procStatus.rssKb / 1024 * 10) / 10 : null,
+      ramMaxMb:  _parseRamToMb(server?.ram),
+      threads:   procStatus?.threads ?? null,
+      sampledAt: Date.now(),
+    });
 
-function stopSampler(serverId) {
-  const id = samplerIntervals.get(serverId);
-  if (id !== undefined) {
-    clearInterval(id);
-    samplerIntervals.delete(serverId);
-  }
-  prevCpuStats.delete(serverId);
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// TPS polling
-// ─────────────────────────────────────────────────────────────────────────────
-
-function requestTps(serverId) {
-  try {
-    require('./serverService').sendCommand(serverId, 'tps');
-  } catch {
-    return; // server not running or stdin closed — ignore
-  }
-
-  const existing = tpsTimeouts.get(serverId);
-  if (existing) clearTimeout(existing);
-
-  // If no TPS log line arrives within TPS_TIMEOUT_MS, mark as unavailable
-  const timer = setTimeout(() => {
-    tpsTimeouts.delete(serverId);
-    if (!tpsCache.get(serverId)?.available) {
-      tpsCache.set(serverId, {
-        m1: null, m5: null, m15: null, available: false, updatedAt: Date.now(),
-      });
-    }
-  }, TPS_TIMEOUT_MS);
-
-  tpsTimeouts.set(serverId, timer);
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// server.properties reader
-// ─────────────────────────────────────────────────────────────────────────────
-
-async function readServerProp(serverPath, key, defaultValue) {
-  try {
-    const content = await fsp.readFile(
-      path.join(serverPath, 'server.properties'),
-      'utf8'
-    );
-    for (const line of content.split('\n')) {
-      const eq = line.indexOf('=');
-      if (eq < 0) continue;
-      if (line.slice(0, eq).trim() === key) return line.slice(eq + 1);
-    }
-  } catch {}
-  return defaultValue;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Disk metrics (60 s cache)
-// ─────────────────────────────────────────────────────────────────────────────
-
-const MINECRAFT_MARKERS = ['level.dat', 'region', 'data', 'DIM-1', 'DIM1'];
-
-// Directories inside a server folder that are never world data — skip when
-// looking for worlds and when counting server root size contributions.
-const SKIP_DIRS = new Set(['backups', 'logs', 'crash-reports', 'cache', 'libraries']);
-
-async function _runDiskScan(serverId) {
-  const server = serverModel.findById(serverId);
-  if (!server) return { root: 0, backups: 0, worlds: {}, sampledAt: Date.now() };
-
-  const serverPath  = server.path;
-  const backupsPath = path.join(serverPath, 'backups');
-
-  // Detect world directories by Minecraft markers
-  const worldsMap = {};
-  try {
-    const entries = await fsp.readdir(serverPath, { withFileTypes: true });
-    await Promise.all(
-      entries.map(async (entry) => {
-        if (!entry.isDirectory() || entry.isSymbolicLink()) return;
-        if (entry.name.startsWith('.')) return; // skip hidden dirs
-        if (SKIP_DIRS.has(entry.name)) return;
-        const entryPath = path.join(serverPath, entry.name);
-        for (const marker of MINECRAFT_MARKERS) {
-          const ok = await fsp
-            .access(path.join(entryPath, marker))
-            .then(() => true)
-            .catch(() => false);
-          if (ok) {
-            worldsMap[entry.name] = await dirSize(entryPath);
-            return;
-          }
-        }
-      })
-    );
-  } catch {}
-
-  const [rootSize, backupsSize] = await Promise.all([
-    dirSize(serverPath),
-    dirSize(backupsPath),
-  ]);
-
-  const result = {
-    root:      rootSize,
-    backups:   backupsSize,
-    worlds:    worldsMap,
-    sampledAt: Date.now(),
+    _maybeInjectTps(serverId);
   };
-  diskCache.set(serverId, result);
-  return result;
+
+  // Run immediately (first CPU sample — no delta yet, cpu will be null)
+  tick();
+  samplerIntervals.set(serverId, setInterval(tick, SAMPLER_INTERVAL_MS));
 }
 
-async function getDiskMetrics(serverId) {
-  const cached = diskCache.get(serverId);
-  if (cached && Date.now() - cached.sampledAt < DISK_CACHE_TTL) return cached;
-
-  // Return the in-flight scan if one is already running for this server.
-  // Prevents N concurrent HTTP requests from launching N parallel dir-walks.
-  if (diskScans.has(serverId)) return diskScans.get(serverId);
-
-  const scan = _runDiskScan(serverId);
-  diskScans.set(serverId, scan);
-  scan.finally(() => diskScans.delete(serverId));
-  return scan;
+function _stopSampler(serverId) {
+  const interval = samplerIntervals.get(serverId);
+  if (interval) { clearInterval(interval); samplerIntervals.delete(serverId); }
+  processCache.delete(serverId);
+  playerCache.delete(serverId);
+  tpsCache.delete(serverId);
+  serverUptimes.delete(serverId);
+  lastTpsCommand.delete(serverId);
+  lastListCommand.delete(serverId);
+  tpsUnavailable.delete(serverId);
+  // diskCache is intentionally kept — disk data is valid even after stop
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// streamEmitter event handlers
-// ─────────────────────────────────────────────────────────────────────────────
+// ─── init() ────────────────────────────────────────────────────────────────────
 
-function handleLog({ serverId, type, data }) {
-  // Start sampler lazily on the first log line — avoids relying on unreliable
-  // 'started' status event (only emitted when pending WS clients are present).
-  startSampler(serverId);
+function init() {
+  _requireServerService();
 
-  if (type === 'stderr') return; // skip stderr for game event parsing
+  // Parse every stdout/stderr line for TPS, players, and server-ready signals.
+  // Also lazily starts the sampler the first time a log arrives for a server.
+  _streamEmitter.on('log', ({ serverId, data, timestamp }) => {
+    const line = typeof data === 'string' ? data : '';
 
-  // Detect "Done (Xs)! For help..." — server is fully started
-  if (!serverDoneSet.has(serverId) && /Done \([\d.]+s\)!/.test(data)) {
-    serverDoneSet.add(serverId);
-    try { require('./serverService').sendCommand(serverId, 'list'); } catch {}
-    requestTps(serverId);
-  }
+    // Lazy sampler start — fires as soon as the JVM produces its first line
+    if (!samplerIntervals.has(serverId)) {
+      _startSampler(serverId);
+      if (!serverUptimes.has(serverId)) {
+        serverUptimes.set(serverId, timestamp || Date.now());
+      }
+    }
 
-  // TPS response from Paper/Spigot
-  const tps = parseTps(data);
-  if (tps) {
-    const t = tpsTimeouts.get(serverId);
-    if (t) { clearTimeout(t); tpsTimeouts.delete(serverId); }
-    tpsCache.set(serverId, { ...tps, available: true, updatedAt: Date.now() });
-  }
+    // TPS
+    if (!tpsUnavailable.has(serverId)) {
+      const tps = _parseTps(line);
+      if (tps) {
+        tpsCache.set(serverId, { ...tps, available: true, updatedAt: Date.now() });
+      }
+    }
 
-  // Ensure player cache entry exists
-  if (!playerCache.has(serverId)) {
-    playerCache.set(serverId, { online: new Set(), max: 20, updatedAt: Date.now() });
-  }
-  const pc = playerCache.get(serverId);
+    // Players (join / leave)
+    const evt = _parsePlayerEvent(line);
+    if (evt) {
+      const current = playerCache.get(serverId) ?? { online: 0, max: 20 };
+      const next = evt === 'join' ? current.online + 1 : Math.max(0, current.online - 1);
+      playerCache.set(serverId, { ...current, online: next });
+    }
 
-  const joined = parsePlayerJoin(data);
-  if (joined) { pc.online.add(joined); pc.updatedAt = Date.now(); }
+    // 'list' command response → authoritative player count
+    const listResult = _parseListResponse(line);
+    if (listResult) {
+      playerCache.set(serverId, { online: listResult.online, max: listResult.max });
+    }
 
-  const left = parsePlayerLeave(data);
-  if (left)   { pc.online.delete(left); pc.updatedAt = Date.now(); }
+    // Server-ready: inject 'list' once and 'tps' once
+    if (DONE_RE.test(line)) {
+      const now = Date.now();
+      if (now - (lastListCommand.get(serverId) || 0) > 5_000) {
+        try { _sendCommand(serverId, 'list'); lastListCommand.set(serverId, now); } catch { /* non-critical */ }
+      }
+      if (!tpsUnavailable.has(serverId) && now - (lastTpsCommand.get(serverId) || 0) > TPS_ANTI_SPAM_MS) {
+        try { _sendCommand(serverId, 'tps');  lastTpsCommand.set(serverId, now);  } catch { /* non-critical */ }
+      }
+    }
+  });
 
-  const listResult = parseListResponse(data);
-  if (listResult) { pc.max = listResult.max; pc.updatedAt = Date.now(); }
+  // Stop sampler and clear state when server process exits
+  _streamEmitter.on('status', ({ serverId, state }) => {
+    if (['normal', 'crashed', 'startup', 'stopping'].includes(state)) {
+      _stopSampler(serverId);
+    }
+  });
 }
 
-function handleStatus({ serverId, state }) {
-  // 'stopped' is included for forward-compatibility; current serverService
-  // emits 'stopping' / 'normal' / 'crashed' / 'startup' for stop scenarios.
-  const finalStates = new Set(['stopped', 'stopping', 'normal', 'crashed', 'startup']);
-  if (finalStates.has(state)) {
-    stopSampler(serverId);
-    processCache.delete(serverId);
-    tpsCache.delete(serverId);
-    playerCache.delete(serverId);
-    serverDoneSet.delete(serverId);
-    const t = tpsTimeouts.get(serverId);
-    if (t) { clearTimeout(t); tpsTimeouts.delete(serverId); }
-  }
-}
+// ─── getServerMetrics ─────────────────────────────────────────────────────────
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Public API
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * Return all metrics for a server. Returns null if the server does not exist.
- * @param {string} serverId
- * @returns {Promise<object | null>}
- */
-async function getMetrics(serverId) {
+async function getServerMetrics(serverId) {
   const server = serverModel.findById(serverId);
   if (!server) return null;
 
+  _requireServerService(); // safe to call multiple times
   const isRunning = server.status === 'running';
 
-  // Process metrics — null when stopped or not yet sampled
-  const procSnap = isRunning ? (processCache.get(serverId) || null) : null;
-  const process_ = procSnap
-    ? { pid: procSnap.pid, cpu: procSnap.cpu, ram: procSnap.ram, threads: procSnap.threads }
-    : null;
+  // ── Process metrics
+  let processMetrics = null;
+  if (isRunning) {
+    const cached = processCache.get(serverId);
+    processMetrics = {
+      cpu:       cached?.cpu       ?? null,
+      ramUsedMb: cached?.ramUsedMb ?? null,
+      ramMaxMb:  cached?.ramMaxMb  ?? _parseRamToMb(server.ram),
+      threads:   cached?.threads   ?? null,
+      pid:       server.pid,
+    };
+  }
 
-  // TPS
-  const tpsData = tpsCache.get(serverId);
-  const tps = tpsData
-    ? { m1: tpsData.m1, m5: tpsData.m5, m15: tpsData.m15, available: tpsData.available }
-    : { m1: null, m5: null, m15: null, available: false };
+  // ── TPS
+  let tpsData;
+  if (!isRunning) {
+    tpsData = { available: false, '1m': null, '5m': null, '15m': null };
+  } else {
+    const cached  = tpsCache.get(serverId);
+    const isStale = !cached || Date.now() - cached.updatedAt > TPS_STALE_MS;
+    const unavail = tpsUnavailable.has(serverId);
+    tpsData = {
+      available: !unavail && !isStale,
+      '1m':  cached?.tps1m  ?? null,
+      '5m':  cached?.tps5m  ?? null,
+      '15m': cached?.tps15m ?? null,
+    };
+  }
 
-  // Players — server.properties is ground truth for max-players
-  const rawMax    = await readServerProp(server.path, 'max-players', '20');
-  const maxFromProps = parseInt(rawMax, 10) || 20;
-  const playerData   = playerCache.get(serverId);
-  const players = {
-    online: playerData ? playerData.online.size : 0,
-    max:    playerData ? playerData.max : maxFromProps,
-  };
+  // ── Players
+  const players   = playerCache.get(serverId) ?? { online: 0, max: 20 };
+  const maxPlayers = await _readMaxPlayers(server.path);
 
-  // World name
-  const rawWorld  = await readServerProp(server.path, 'level-name', 'world');
-  const worldName = rawWorld.trim() || 'world';
+  // ── World name
+  let world = 'world';
+  try { world = await _readLevelName(server.path); } catch { /* default */ }
 
-  // Disk
-  const disk = await getDiskMetrics(serverId);
+  // ── Disk
+  const disk = await _getDiskMetrics(serverId, server.path);
 
-  // Uptime from serverService snapshot
-  const snap       = require('./serverService').getMetricsSnapshot();
-  const serverSnap = snap.serverList.find((s) => s.id === serverId);
-  const uptime     = serverSnap ? serverSnap.uptime : 0;
+  // ── Uptime
+  // Use getMetricsSnapshot() for the authoritative startedAt from the processes Map.
+  // Falls back to our own serverUptimes if the snapshot doesn't have this server yet.
+  let uptimeMs = 0;
+  if (isRunning) {
+    const snap = _getMetricsSnapshot();
+    const snapServer = snap.serverList.find(s => s.id === serverId);
+    uptimeMs = snapServer ? snapServer.uptime : (Date.now() - (serverUptimes.get(serverId) || Date.now()));
+  }
 
   return {
     server: {
@@ -456,45 +426,34 @@ async function getMetrics(serverId) {
       name:   server.name,
       status: server.status,
       port:   server.port,
-      uptime,
+      pid:    server.pid ?? null,
+      uptime: uptimeMs,
     },
-    process: process_,
+    process: processMetrics,
     minecraft: {
-      tps,
-      players,
-      world: worldName,
+      tps: tpsData,
+      players: {
+        online: isRunning ? players.online : 0,
+        max:    maxPlayers,
+      },
+      world,
     },
-    disk: {
-      root:    disk.root,
-      backups: disk.backups,
-      worlds:  disk.worlds,
-    },
+    disk,
     sampledAt: Date.now(),
   };
 }
 
-/**
- * Subscribe to streamEmitter events. Must be called once from app.js.
- */
-function init() {
-  const { streamEmitter } = require('./serverService');
-  streamEmitter.on('log',    handleLog);
-  streamEmitter.on('status', handleStatus);
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Exports
-// ─────────────────────────────────────────────────────────────────────────────
-
 module.exports = {
   init,
-  getMetrics,
-  getDiskMetrics,
-  // Exported for unit testing
-  parseTps,
-  parsePlayerJoin,
-  parsePlayerLeave,
-  parseListResponse,
-  parseProcStatus,
-  dirSize,
+  getServerMetrics,
+  // Exported with underscore prefix for unit testing only
+  _parseTps,
+  _parsePlayerEvent,
+  _parseListResponse,
+  _parseRamToMb,
+  _calcDirSize,
+  _readMaxPlayers,
+  _readProcStat,
+  _readSysCpuTotal,
+  _readProcStatus,
 };

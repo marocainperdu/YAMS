@@ -1,6 +1,5 @@
 'use strict';
 
-const { v4: uuidv4 } = require('uuid');
 const { getDb } = require('../db');
 
 let stmts = null;
@@ -10,69 +9,44 @@ function getStmts() {
     const db = getDb();
     stmts = {
       insert: db.prepare(
-        `INSERT INTO users (id, email, password_hash, role, created_at, must_change_password)
-         VALUES (?, ?, ?, ?, ?, ?)`
+        `INSERT INTO users (id, username, password_hash, role) VALUES (?, ?, ?, ?)`
       ),
-      findAll: db.prepare(
-        `SELECT id, email, username, role, created_at FROM users ORDER BY created_at DESC`
+      findById: db.prepare(
+        `SELECT * FROM users WHERE id = ?`
       ),
-      findByEmail: db.prepare(`SELECT * FROM users WHERE email = ?`),
-      findById:    db.prepare(`SELECT * FROM users WHERE id = ?`),
-      count:       db.prepare(`SELECT COUNT(*) AS c FROM users`),
-      updatePassword: db.prepare(
-        `UPDATE users SET password_hash = ?, must_change_password = 0 WHERE id = ?`
+      findByUsername: db.prepare(
+        `SELECT * FROM users WHERE username = ?`
       ),
-      updateProfile: db.prepare(
-        `UPDATE users SET email = ?, username = ? WHERE id = ?`
+      count: db.prepare(
+        `SELECT COUNT(*) AS n FROM users`
       ),
-      updateTotp: db.prepare(
-        `UPDATE users SET totp_secret = ?, totp_enabled = ? WHERE id = ?`
-      ),
-      updateTotpLastCode: db.prepare(
-        `UPDATE users SET totp_last_code = ? WHERE id = ?`
+      incrementTokenVersion: db.prepare(
+        `UPDATE users SET token_version = token_version + 1 WHERE id = ?`
       ),
     };
   }
   return stmts;
 }
 
-function create({ email, passwordHash, role = 'user', mustChangePassword = false }) {
-  const s = getStmts();
-  const id = uuidv4();
-  s.insert.run(id, email, passwordHash, role, Date.now(), mustChangePassword ? 1 : 0);
+function create({ id, username, passwordHash, role }) {
+  getStmts().insert.run(id, username, passwordHash, role);
   return findById(id);
 }
 
-function updatePassword(id, newHash) {
-  getStmts().updatePassword.run(newHash, id);
-}
-
-function updateProfile(id, { email, username }) {
-  getStmts().updateProfile.run(email, username ?? null, id);
-}
-
-function findAll() {
-  return getStmts().findAll.all();
-}
-
-function findByEmail(email) {
-  return getStmts().findByEmail.get(email);
-}
-
 function findById(id) {
-  return getStmts().findById.get(id);
+  return getStmts().findById.get(id) ?? null;
+}
+
+function findByUsername(username) {
+  return getStmts().findByUsername.get(username) ?? null;
 }
 
 function count() {
-  return getStmts().count.get().c;
+  return getStmts().count.get().n;
 }
 
-function updateTotp(id, { secret, enabled }) {
-  getStmts().updateTotp.run(secret ?? null, enabled ? 1 : 0, id);
+function incrementTokenVersion(id) {
+  getStmts().incrementTokenVersion.run(id);
 }
 
-function updateTotpLastCode(id, code) {
-  getStmts().updateTotpLastCode.run(code ?? null, id);
-}
-
-module.exports = { create, findAll, findByEmail, findById, count, updatePassword, updateProfile, updateTotp, updateTotpLastCode };
+module.exports = { create, findById, findByUsername, count, incrementTokenVersion };

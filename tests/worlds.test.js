@@ -773,11 +773,11 @@ describe('importWorld', () => {
 
 describe('exportWorld', () => {
   test('streams zip with correct Content-Type and Content-Disposition headers', async () => {
-    const { serverDir } = await makeServer();
+    const { serverId, serverDir } = await makeServer();
     await makeWorld(serverDir, 'export-me', ['level.dat']);
 
     const res = new FakeRes();
-    await worldService.exportWorld(serverDir, 'export-me', res);
+    await worldService.exportWorld(serverId, serverDir, 'export-me', res);
 
     assert.equal(res.headers['Content-Type'], 'application/zip');
     assert.ok(res.headers['Content-Disposition'].includes('export-me'));
@@ -786,12 +786,12 @@ describe('exportWorld', () => {
   });
 
   test('zip is valid and contains world files', async () => {
-    const { serverDir } = await makeServer();
+    const { serverId, serverDir } = await makeServer();
     await makeWorld(serverDir, 'ziptest', ['level.dat']);
     await fsp.writeFile(path.join(serverDir, 'ziptest', 'level.dat'), 'nbt-content');
 
     const res = new FakeRes();
-    await worldService.exportWorld(serverDir, 'ziptest', res);
+    await worldService.exportWorld(serverId, serverDir, 'ziptest', res);
 
     const buf = res.getBuffer();
     assert.ok(buf.length > 0, 'zip buffer must not be empty');
@@ -802,11 +802,11 @@ describe('exportWorld', () => {
   });
 
   test('world directory is the root entry in the zip (files under worldName/)', async () => {
-    const { serverDir } = await makeServer();
+    const { serverId, serverDir } = await makeServer();
     await makeWorld(serverDir, 'rootcheck', ['level.dat']);
 
     const res = new FakeRes();
-    await worldService.exportWorld(serverDir, 'rootcheck', res);
+    await worldService.exportWorld(serverId, serverDir, 'rootcheck', res);
 
     const zipDir = await unzipper.Open.buffer(res.getBuffer());
     const nonRoot = zipDir.files.filter(f => !f.path.startsWith('rootcheck/') && f.path !== 'rootcheck/');
@@ -814,13 +814,13 @@ describe('exportWorld', () => {
   });
 
   test('excludes .lock files from the exported zip', async () => {
-    const { serverDir } = await makeServer();
+    const { serverId, serverDir } = await makeServer();
     await makeWorld(serverDir, 'locktest', ['level.dat']);
     await fsp.writeFile(path.join(serverDir, 'locktest', 'session.lock'), 'lock');
     await fsp.writeFile(path.join(serverDir, 'locktest', 'uid.dat'),      'uid');
 
     const res = new FakeRes();
-    await worldService.exportWorld(serverDir, 'locktest', res);
+    await worldService.exportWorld(serverId, serverDir, 'locktest', res);
 
     const zipDir = await unzipper.Open.buffer(res.getBuffer());
     const names  = zipDir.files.map(f => f.path);
@@ -829,23 +829,23 @@ describe('exportWorld', () => {
   });
 
   test('404 WORLD_NOT_FOUND for non-existent world', async () => {
-    const { serverDir } = await makeServer();
+    const { serverId, serverDir } = await makeServer();
     await assert.rejects(
-      () => worldService.exportWorld(serverDir, 'ghost', new FakeRes()),
+      () => worldService.exportWorld(serverId, serverDir, 'ghost', new FakeRes()),
       e => e.statusCode === 404 && e.code === 'WORLD_NOT_FOUND'
     );
   });
 
   test('400 INVALID_WORLD_NAME for path traversal', async () => {
-    const { serverDir } = await makeServer();
+    const { serverId, serverDir } = await makeServer();
     await assert.rejects(
-      () => worldService.exportWorld(serverDir, '../escape', new FakeRes()),
+      () => worldService.exportWorld(serverId, serverDir, '../escape', new FakeRes()),
       e => e.statusCode === 400 && e.code === 'INVALID_WORLD_NAME'
     );
   });
 
   test('400 SYMLINK_FORBIDDEN for symlinked world', async () => {
-    const { serverDir } = await makeServer();
+    const { serverId, serverDir } = await makeServer();
     const real = path.join(TEST_ROOT, `real-exp-${uuidv4()}`);
     await fsp.mkdir(real, { recursive: true });
     await fsp.writeFile(path.join(real, 'level.dat'), 'fake');
@@ -854,19 +854,31 @@ describe('exportWorld', () => {
     } catch { return; }
 
     await assert.rejects(
-      () => worldService.exportWorld(serverDir, 'sym-exp', new FakeRes()),
+      () => worldService.exportWorld(serverId, serverDir, 'sym-exp', new FakeRes()),
       e => e.statusCode === 400 && e.code === 'SYMLINK_FORBIDDEN'
     );
   });
 
-  test('export is allowed while server is stopped (no server-running check)', async () => {
-    // exportWorld intentionally has no SERVER_RUNNING guard — export is read-only
+  test('409 SERVER_RUNNING when server is running', async () => {
     const { serverId, serverDir } = await makeServer();
-    await makeWorld(serverDir, 'readonly');
-    // Server is already stopped (default), just confirm export succeeds
+    await makeWorld(serverDir, 'run-exp', ['level.dat']);
+    serverModel.updateStatus(serverId, 'running', 99999);
+    try {
+      await assert.rejects(
+        () => worldService.exportWorld(serverId, serverDir, 'run-exp', new FakeRes()),
+        e => e.statusCode === 409 && e.code === 'SERVER_RUNNING'
+      );
+    } finally {
+      serverModel.updateStatus(serverId, 'stopped', null);
+    }
+  });
+
+  test('export succeeds when server is stopped', async () => {
+    const { serverId, serverDir } = await makeServer();
+    await makeWorld(serverDir, 'readonly', ['level.dat']);
     const res = new FakeRes();
     await assert.doesNotReject(
-      () => worldService.exportWorld(serverDir, 'readonly', res)
+      () => worldService.exportWorld(serverId, serverDir, 'readonly', res)
     );
     assert.ok(res.getBuffer().length > 0);
   });
