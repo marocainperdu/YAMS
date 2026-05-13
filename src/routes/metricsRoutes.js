@@ -4,7 +4,7 @@ const { Router }         = require('express');
 const { getObservability }  = require('../utils/observability');
 const { getMetricsSnapshot } = require('../services/serverService');
 const metricsController  = require('../controllers/metricsController');
-const { authMiddleware }  = require('../middleware/authMiddleware');
+const { authMiddleware }  = require('../middleware/auth');
 
 const router = Router();
 

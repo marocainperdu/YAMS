@@ -2,7 +2,7 @@
 
 const { Router } = require('express');
 const controller = require('../controllers/twoFAController');
-const { authMiddleware } = require('../middleware/authMiddleware');
+const { authMiddleware } = require('../middleware/auth');
 
 const router = Router();
 

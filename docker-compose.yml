@@ -8,7 +8,11 @@ services:
       - yams-data:/app/data      # yams.db
       - yams-servers:/app/servers # server JARs, worlds, configs
     environment:
+      NODE_ENV: production
       PORT: 3000
+      # Binds to localhost only by default. Set to 0.0.0.0 to expose on the network
+      # (e.g. when accessing from another machine). Use a reverse proxy for TLS in that case.
+      BIND_ADDRESS: ${BIND_ADDRESS:-127.0.0.1}
       YAMS_AUTH_ENABLED: "true"
       JWT_SECRET: ${JWT_SECRET}
       YAMS_ADMIN_USERNAME: ${YAMS_ADMIN_USERNAME}
