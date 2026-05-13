@@ -17,7 +17,7 @@ function buildCtx(req) {
   return {
     requestId: req.headers['x-request-id'] ?? uuidv4(),
     ip:        req.ip ?? req.socket?.remoteAddress ?? 'unknown',
-    userId:    req.user?.id ?? null,
+    userId:    req.user?.userId ?? null,
   };
 }
 

@@ -48,6 +48,10 @@ const WebSocket = require('ws');
 const { subscribe, unsubscribe, sendCommand, streamEmitter, getObservability, CRASH_CLASSIFY } = require('../services/serverService');
 const observability = require('../utils/observability');
 
+// Mirrors the flag used by the HTTP middleware so WS auth is consistent.
+const AUTH_ENABLED = process.env.YAMS_AUTH_ENABLED === 'true';
+const jwt = AUTH_ENABLED ? require('jsonwebtoken') : null;
+
 // Interval between server-side ping probes (ms).
 // Clients that don't respond within this window are terminated.
 const HEARTBEAT_INTERVAL_MS = 30_000;
@@ -71,7 +75,42 @@ const ERROR_CODES = {
  * @returns {WebSocket.Server}
  */
 function createWsServer(httpServer) {
-  const wss = new WebSocket.Server({ server: httpServer, path: '/ws' });
+  // noServer: true — we own the upgrade handshake so we can run auth before ws accepts.
+  const wss = new WebSocket.Server({ noServer: true });
+
+  // ── JWT upgrade guard ────────────────────────────────────────────────────────
+  // Intercepts the HTTP→WS upgrade before ws completes the handshake.
+  // Token is expected as a query param: ws://host/ws?token=<jwt>
+  // When YAMS_AUTH_ENABLED is not 'true' the check is skipped entirely.
+  httpServer.on('upgrade', (req, socket, head) => {
+    // Filter to /ws only — destroy any upgrade attempt on other paths.
+    const url = new URL(req.url, 'http://localhost');
+    if (url.pathname !== '/ws') {
+      socket.destroy();
+      return;
+    }
+
+    if (AUTH_ENABLED) {
+      const token = url.searchParams.get('token') ?? '';
+      if (!token) {
+        socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
+        socket.destroy();
+        return;
+      }
+      try {
+        req.wsUser = jwt.verify(token, process.env.JWT_SECRET, { algorithms: ['HS256'] });
+      } catch {
+        socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
+        socket.destroy();
+        return;
+      }
+    }
+
+    wss.handleUpgrade(req, socket, head, (ws) => {
+      if (req.wsUser) ws.user = req.wsUser; // available to all message handlers
+      wss.emit('connection', ws, req);
+    });
+  });
 
   // ── Event listeners for service-level events ───────────────────────────────
   // Listen to server lifecycle events and stream them to connected clients.
