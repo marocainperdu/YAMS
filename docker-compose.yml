@@ -1,0 +1,20 @@
+services:
+  yams:
+    build: .
+    # host networking lets Minecraft servers bind their ports (25565, 25566, …)
+    # without declaring a fixed port range in advance.
+    network_mode: host
+    volumes:
+      - yams-data:/app/data      # yams.db
+      - yams-servers:/app/servers # server JARs, worlds, configs
+    environment:
+      PORT: 3000
+      YAMS_AUTH_ENABLED: "true"
+      JWT_SECRET: ${JWT_SECRET}
+      YAMS_ADMIN_USERNAME: ${YAMS_ADMIN_USERNAME}
+      YAMS_ADMIN_PASSWORD: ${YAMS_ADMIN_PASSWORD}
+    restart: unless-stopped
+
+volumes:
+  yams-data:
+  yams-servers:
