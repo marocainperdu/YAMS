@@ -53,6 +53,8 @@ app.use((req, _res, next) => {
 // Routes
 // ---------------------------------------------------------------------------
 
+app.get('/health', (_req, res) => res.json({ status: 'ok' }));
+
 app.use('/auth',    authRoutes);
 app.use('/servers', serverRoutes);
 app.use('/servers/:id/files', fileRoutes);
