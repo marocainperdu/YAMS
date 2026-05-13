@@ -208,7 +208,7 @@ describe('logout', () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('logoutAll', () => {
-  test('revokes all tokens for a user', async () => {
+  test('revokes all refresh tokens for a user', async () => {
     await authService.register('ivan', 'password123', 'user');
     const user = userModel.findByUsername('ivan');
 
@@ -223,6 +223,17 @@ describe('logoutAll', () => {
         err => { assert.equal(err.code, 'TOKEN_REVOKED'); return true; }
       );
     }
+  });
+
+  test('increments token_version so outstanding access tokens are immediately invalid', async () => {
+    await authService.register('judy', 'password123', 'user');
+    const before = userModel.findByUsername('judy');
+    assert.equal(before.token_version, 0);
+
+    authService.logoutAll(before.id);
+
+    const after = userModel.findByUsername('judy');
+    assert.equal(after.token_version, 1, 'token_version must increment to invalidate access tokens');
   });
 });
 

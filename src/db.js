@@ -49,9 +49,20 @@ function migrate(db) {
       username      TEXT    NOT NULL UNIQUE,
       password_hash TEXT    NOT NULL,
       role          TEXT    NOT NULL CHECK (role IN ('admin', 'operator', 'user')),
+      token_version INTEGER NOT NULL DEFAULT 0,
       created_at    TEXT    NOT NULL DEFAULT (datetime('now'))
     );
 
+  `);
+
+  // Idempotent column addition for DBs created before token_version existed.
+  try {
+    db.exec(`ALTER TABLE users ADD COLUMN token_version INTEGER NOT NULL DEFAULT 0`);
+  } catch (e) {
+    if (!e.message.includes('duplicate column')) throw e;
+  }
+
+  db.exec(`
     CREATE TABLE IF NOT EXISTS refresh_tokens (
       id          TEXT    PRIMARY KEY,
       user_id     TEXT    NOT NULL REFERENCES users(id) ON DELETE CASCADE,

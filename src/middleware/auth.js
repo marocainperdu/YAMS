@@ -17,7 +17,8 @@ if (AUTH_ENABLED) {
 // jsonwebtoken is a production dependency (npm install jsonwebtoken).
 // Only required when auth is enabled so that test runs without the package
 // installed would still work (the guard above short-circuits first).
-const jwt = AUTH_ENABLED ? require('jsonwebtoken') : null;
+const jwt       = AUTH_ENABLED ? require('jsonwebtoken') : null;
+const userModel = require('../models/userModel');
 const { securityLog } = require('../utils/securityLog');
 
 function clientIp(req) {
@@ -57,18 +58,27 @@ function authMiddleware(req, res, next) {
   }
 
   // Strict payload validation — missing or wrongly-typed claims → 401.
-  const validRoles = new Set(['admin', 'operator', 'user']);
-  const userIdOk   = payload.userId !== undefined && payload.userId !== null &&
-                     (typeof payload.userId === 'string' || typeof payload.userId === 'number');
-  const roleOk     = typeof payload.role === 'string' && validRoles.has(payload.role);
+  const validRoles        = new Set(['admin', 'operator', 'user']);
+  const userIdOk          = payload.userId !== undefined && payload.userId !== null &&
+                            (typeof payload.userId === 'string' || typeof payload.userId === 'number');
+  const roleOk            = typeof payload.role === 'string' && validRoles.has(payload.role);
+  const tokenVersionOk    = typeof payload.tokenVersion === 'number';
 
-  if (!userIdOk || !roleOk) {
+  if (!userIdOk || !roleOk || !tokenVersionOk) {
     securityLog('warn', 'auth.failed', { ip, reason: 'invalid_claims' });
     return res.status(401).json({ error: 'Token is missing required claims', code: 'INVALID_TOKEN' });
   }
 
+  // Token-version check: reject access tokens that were invalidated by logoutAll.
+  // One synchronous SQLite read per request — negligible for a local tool.
+  const user = userModel.findById(payload.userId);
+  if (!user || user.token_version !== payload.tokenVersion) {
+    securityLog('warn', 'auth.failed', { ip, userId: payload.userId, reason: 'token_version_mismatch' });
+    return res.status(401).json({ error: 'Token has been revoked', code: 'TOKEN_REVOKED' });
+  }
+
   securityLog('info', 'auth.success', { ip, userId: payload.userId, role: payload.role });
-  req.user = payload; // { userId, role, iat, exp, ... }
+  req.user = payload; // { userId, role, tokenVersion, iat, exp, ... }
   next();
 }
 
