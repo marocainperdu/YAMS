@@ -109,4 +109,24 @@ function requireServerPermission(action) {
   };
 }
 
-module.exports = { authMiddleware, requireServerPermission };
+// ─── Admin gate ───────────────────────────────────────────────────────────────
+//
+// Enforces that the caller has the 'admin' role.
+// Must run after authMiddleware.
+
+function requireAdmin(req, res, next) {
+  if (!AUTH_ENABLED) return next();
+
+  if (!req.user || req.user.role !== 'admin') {
+    securityLog('warn', 'rbac.denied', {
+      ip:     clientIp(req),
+      userId: req.user?.userId,
+      role:   req.user?.role,
+      action: 'admin',
+    });
+    return res.status(403).json({ error: 'Admin only', code: 'FORBIDDEN' });
+  }
+  next();
+}
+
+module.exports = { authMiddleware, requireServerPermission, requireAdmin };

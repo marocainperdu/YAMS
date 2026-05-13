@@ -17,6 +17,7 @@ const { getDb } = require('./src/db');
 require('./src/services/serverService');
 require('./src/services/metricsService').init(); // start log parsing listeners
 
+const authRoutes    = require('./src/routes/authRoutes');
 const serverRoutes  = require('./src/routes/serverRoutes');
 const fileRoutes    = require('./src/routes/fileRoutes');
 const backupRoutes  = require('./src/routes/backupRoutes');
@@ -52,6 +53,7 @@ app.use((req, _res, next) => {
 // Routes
 // ---------------------------------------------------------------------------
 
+app.use('/auth',    authRoutes);
 app.use('/servers', serverRoutes);
 app.use('/servers/:id/files', fileRoutes);
 app.use('/servers/:id/backups', backupRoutes);
@@ -108,12 +110,23 @@ app.use((err, _req, res, _next) => {
 // Ensure DB is initialized (runs migration) before accepting connections
 getDb();
 
+// Seed the first admin user from env vars if no users exist yet.
+// Runs asynchronously; the HTTP server starts in parallel — the window
+// before the seed completes is milliseconds on first boot only.
+const { seedAdmin } = require('./src/services/authService');
+seedAdmin().catch(err => console.error('[YAMS] Admin seed failed:', err));
+
 // Capture the http.Server so we can attach the WebSocket server to it.
 // Both HTTP and WS share the same port — no separate WS_PORT needed.
 const BIND   = process.env.BIND_ADDRESS || '127.0.0.1';
 const server = app.listen(PORT, BIND, () => {
   console.log(`[YAMS] Running on http://localhost:${PORT}`);
   console.log('[YAMS] Endpoints:');
+  console.log('  POST   /auth/login');
+  console.log('  POST   /auth/refresh');
+  console.log('  POST   /auth/logout');
+  console.log('  POST   /auth/logout-all');
+  console.log('  POST   /auth/register');
   console.log('  POST   /servers');
   console.log('  GET    /servers');
   console.log('  GET    /servers/:id');

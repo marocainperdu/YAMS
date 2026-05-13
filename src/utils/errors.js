@@ -32,6 +32,9 @@ const notFound = (msg, code) => _make(msg || 'Not found', 404, code);
 /** 409 Conflict */
 const conflict = (msg, code) => _make(msg || 'Conflict', 409, code);
 
+/** 401 Unauthorized */
+const unauthorized = (msg, code) => _make(msg || 'Unauthorized', 401, code);
+
 /** 403 Forbidden */
 const forbidden = (msg, code) => _make(msg || 'Forbidden', 403, code);
 
@@ -48,4 +51,4 @@ function internal(msg, code) {
   return e;
 }
 
-module.exports = { AppError, badRequest, notFound, conflict, forbidden, tooLarge, internal };
+module.exports = { AppError, badRequest, notFound, conflict, unauthorized, forbidden, tooLarge, internal };
