@@ -46,27 +46,32 @@ function migrate(db) {
 
     CREATE TABLE IF NOT EXISTS users (
       id            TEXT    PRIMARY KEY,
-      email         TEXT    NOT NULL UNIQUE,
+      username      TEXT    NOT NULL UNIQUE,
       password_hash TEXT    NOT NULL,
-      role          TEXT    NOT NULL DEFAULT 'user',
-      created_at    INTEGER NOT NULL
+      role          TEXT    NOT NULL CHECK (role IN ('admin', 'operator', 'user')),
+      token_version INTEGER NOT NULL DEFAULT 0,
+      created_at    TEXT    NOT NULL DEFAULT (datetime('now'))
     );
 
-    CREATE TABLE IF NOT EXISTS server_permissions (
-      id          TEXT    PRIMARY KEY,
-      user_id     TEXT    NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      server_id   TEXT    NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
-      permissions TEXT    NOT NULL DEFAULT '{}',
-      UNIQUE(user_id, server_id)
-    );
   `);
 
-  // Idempotent: silently ignored if column already exists
-  try { db.exec(`ALTER TABLE users ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 0`); } catch {}
-  try { db.exec(`ALTER TABLE users ADD COLUMN username TEXT`); } catch {}
-  try { db.exec(`ALTER TABLE users ADD COLUMN totp_secret TEXT`); } catch {}
-  try { db.exec(`ALTER TABLE users ADD COLUMN totp_enabled INTEGER NOT NULL DEFAULT 0`); } catch {}
-  try { db.exec(`ALTER TABLE users ADD COLUMN totp_last_code TEXT`); } catch {} // H2: replay prevention
+  // Idempotent column addition for DBs created before token_version existed.
+  try {
+    db.exec(`ALTER TABLE users ADD COLUMN token_version INTEGER NOT NULL DEFAULT 0`);
+  } catch (e) {
+    if (!e.message.includes('duplicate column')) throw e;
+  }
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS refresh_tokens (
+      id          TEXT    PRIMARY KEY,
+      user_id     TEXT    NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      token_hash  TEXT    NOT NULL UNIQUE,
+      expires_at  INTEGER NOT NULL,
+      revoked     INTEGER NOT NULL DEFAULT 0,
+      created_at  TEXT    NOT NULL DEFAULT (datetime('now'))
+    );
+  `);
 }
 
 module.exports = { getDb };

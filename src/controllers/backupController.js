@@ -3,6 +3,7 @@
 const serverModel   = require('../models/serverModel');
 const backupService = require('../services/backupService');
 const { notFound }  = require('../utils/errors');
+const { securityLog } = require('../utils/securityLog');
 
 function requireServer(id) {
   const server = serverModel.findById(id);
@@ -50,9 +51,15 @@ async function remove(req, res, next) {
 }
 
 async function restore(req, res, next) {
+  const ip       = req.ip ?? req.socket?.remoteAddress ?? 'unknown';
+  const userId   = req.user?.userId ?? null;
+  const serverId = req.params.id;
+  const backupId = req.params.backupId;
   try {
-    const server = requireServer(req.params.id);
-    await backupService.restoreBackup(req.params.id, req.params.backupId, server.path);
+    const server = requireServer(serverId);
+    securityLog('info', 'backup.restore.start', { ip, userId, serverId, backupId });
+    await backupService.restoreBackup(serverId, backupId, server.path);
+    securityLog('info', 'backup.restore.complete', { ip, userId, serverId, backupId });
     res.json({ data: { message: 'Restore completed successfully' } });
   } catch (err) {
     next(err);

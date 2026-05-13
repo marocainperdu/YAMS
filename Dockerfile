@@ -46,6 +46,7 @@ RUN mkdir -p /app/data /app/servers \
 USER node
 
 ENV PORT=3000 \
+    BIND_ADDRESS=0.0.0.0 \
     YAMS_DB=/app/data/yams.db \
     YAMS_SERVERS_ROOT=/app/servers \
     NODE_ENV=production
@@ -53,6 +54,6 @@ ENV PORT=3000 \
 EXPOSE 3000
 
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
-  CMD wget -qO- http://localhost:3000/metrics || exit 1
+  CMD wget -qO- http://localhost:3000/health || exit 1
 
 CMD ["node", "app.js"]
