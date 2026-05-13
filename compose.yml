@@ -6,6 +6,8 @@ services:
     volumes:
       - ./servers:/app/servers   # bind mount — place server.jar files here from the host
       - yams_data:/app/data      # named volume — SQLite database
+    env_file:
+      - .env
     environment:
       - PORT=3000
       - YAMS_DB=/app/data/yams.db
