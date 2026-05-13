@@ -38,7 +38,14 @@ const forbidden = (msg, code) => _make(msg || 'Forbidden', 403, code);
 /** 413 Payload Too Large */
 const tooLarge = (msg, code) => _make(msg || 'Payload too large', 413, code);
 
-/** 500 Internal Server Error (operational) */
-const internal = (msg, code) => _make(msg || 'Internal server error', 500, code);
+/** 500 Internal Server Error — NOT operational.
+ *  The message is logged server-side only; the client receives a generic
+ *  "Internal server error" response.  Use this for unexpected failures or
+ *  guard violations that must never leak filesystem paths or internal state. */
+function internal(msg, code) {
+  const e = _make(msg || 'Internal server error', 500, code);
+  e.isOperational = false; // prevents message from being sent to the client
+  return e;
+}
 
 module.exports = { AppError, badRequest, notFound, conflict, forbidden, tooLarge, internal };
