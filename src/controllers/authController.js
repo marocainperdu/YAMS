@@ -9,9 +9,9 @@ function extractBearer(req) {
 
 async function login(req, res, next) {
   try {
-    const { username, password } = req.body ?? {};
-    const tokens = await authService.login(username, password);
-    res.json({ data: tokens });
+    const { username, password, totpCode } = req.body ?? {};
+    const result = await authService.login(username, password, totpCode);
+    res.json({ data: result });
   } catch (err) {
     next(err);
   }

@@ -7,6 +7,7 @@ const { v4: uuidv4 } = require('uuid');
 
 const userModel         = require('../models/userModel');
 const refreshTokenModel = require('../models/refreshTokenModel');
+const twoFAService      = require('./twoFAService');
 const { unauthorized, conflict, badRequest } = require('../utils/errors');
 
 const BCRYPT_ROUNDS        = 12;
@@ -62,7 +63,7 @@ async function register(username, password, role = 'operator') {
 
 // ─── login ───────────────────────────────────────────────────────────────────
 
-async function login(username, password) {
+async function login(username, password, totpCode) {
   if (!username || !password) {
     throw badRequest('Username and password are required', 'MISSING_CREDENTIALS');
   }
@@ -79,12 +80,22 @@ async function login(username, password) {
     throw unauthorized('Invalid credentials', 'INVALID_CREDENTIALS');
   }
 
+  // TOTP step: if the user has 2FA enabled, require and verify the code.
+  if (user.totp_enabled) {
+    if (!totpCode) {
+      return { requiresTOTP: true };
+    }
+    if (!twoFAService.verifyCode(user, String(totpCode))) {
+      throw unauthorized('Invalid authentication code', 'INVALID_TOTP');
+    }
+  }
+
   // Opportunistically prune stale tokens on login
   refreshTokenModel.purgeStale();
 
   const accessToken  = issueAccessToken(user);
   const refreshToken = issueRefreshToken(user.id);
-  return { accessToken, refreshToken };
+  return { token: accessToken, refreshToken, username: user.username };
 }
 
 // ─── refresh ─────────────────────────────────────────────────────────────────

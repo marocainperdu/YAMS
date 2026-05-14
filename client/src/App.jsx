@@ -294,9 +294,9 @@ export default function App() {
     return () => window.removeEventListener('yams-auth-logout', onAutoLogout)
   }, [])
 
-  function handleLogin({ email, userId, role, token, forcePasswordChange: fpc, username }) {
+  function handleLogin({ id, role, token, forcePasswordChange: fpc, username }) {
     sessionStorage.setItem('yams_token', token)
-    const user = { email, userId, role, username: username ?? null }
+    const user = { id, role, username: username ?? null }
     sessionStorage.setItem('yams_user', JSON.stringify(user))
     if (fpc) sessionStorage.setItem('yams_force_pw', 'true')
     else sessionStorage.removeItem('yams_force_pw')
