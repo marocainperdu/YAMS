@@ -1,6 +1,6 @@
 services:
   yams:
-    image: marocainperdu/yams:latest
+    image: momokabil/yams:latest
     # Uncomment the line below (and remove or comment image:) to build from source instead.
     # build: .
     # host networking lets Minecraft servers bind their ports (25565, 25566, …)

@@ -31,13 +31,13 @@ jobs:
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       # Derives tags automatically:
-      #   push to main          → marocainperdu/yams:latest
-      #   git tag v1.2.3        → marocainperdu/yams:1.2.3, :1.2, :1, :latest
+      #   push to main          → momokabil/yams:latest
+      #   git tag v1.2.3        → momokabil/yams:1.2.3, :1.2, :1, :latest
       - name: Extract image metadata
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: marocainperdu/yams
+          images: momokabil/yams
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
