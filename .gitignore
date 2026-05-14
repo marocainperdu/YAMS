@@ -28,7 +28,6 @@ servers/*/whitelist.json
 
 # Logs
 *.log
-docs/
 
 # Environment variables
 .env
