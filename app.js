@@ -15,14 +15,17 @@ const swaggerUi = require('swagger-ui-express');
 // stale 'running' status from a previous session that crashed.
 const { getDb } = require('./src/db');
 require('./src/services/serverService');
-require('./src/services/metricsService').init(); // start log parsing listeners
+require('./src/services/metricsService').init();   // start log parsing listeners
+require('./src/services/schedulerService').init(); // start cron tick loop
 
 const authRoutes    = require('./src/routes/authRoutes');
 const serverRoutes  = require('./src/routes/serverRoutes');
 const fileRoutes    = require('./src/routes/fileRoutes');
 const backupRoutes  = require('./src/routes/backupRoutes');
 const worldRoutes   = require('./src/routes/worldRoutes');
-const metricsRoutes = require('./src/routes/metricsRoutes');
+const metricsRoutes   = require('./src/routes/metricsRoutes');
+const scheduleRoutes  = require('./src/routes/scheduleRoutes');
+const { userRouter, permissionRouter } = require('./src/routes/userRoutes');
 const swaggerSpec = require('./src/swagger');
 const { createWsServer } = require('./src/websocket/wsServer');
 
@@ -55,12 +58,15 @@ app.use((req, _res, next) => {
 
 app.get('/health', (_req, res) => res.json({ status: 'ok' }));
 
-app.use('/auth',    authRoutes);
-app.use('/servers', serverRoutes);
-app.use('/servers/:id/files', fileRoutes);
-app.use('/servers/:id/backups', backupRoutes);
-app.use('/servers/:id/worlds', worldRoutes);
-app.use('/metrics', metricsRoutes);
+app.use('/auth',                    authRoutes);
+app.use('/servers',                 serverRoutes);
+app.use('/servers/:id/files',       fileRoutes);
+app.use('/servers/:id/backups',     backupRoutes);
+app.use('/servers/:id/worlds',      worldRoutes);
+app.use('/servers/:id/schedules',   scheduleRoutes);
+app.use('/metrics',                 metricsRoutes);
+app.use('/users',                   userRouter);
+app.use('/permissions',             permissionRouter);
 app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 
 // ---------------------------------------------------------------------------
