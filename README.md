@@ -107,6 +107,30 @@ All endpoints require a `Bearer <token>` header when auth is enabled.
 | POST | `/servers/:id/worlds/active` | Set active world |
 | WS | `/ws?token=<jwt>` | Console stream |
 
+## Docker Hub
+
+Pre-built images are available at [`marocainperdu/yams`](https://hub.docker.com/r/marocainperdu/yams).
+
+Images are built automatically by GitHub Actions on every push to `main` and on every version tag (`v1.2.3`).
+
+To build from source instead of pulling, replace `image:` with `build: .` in `compose.yml`.
+
+### Required GitHub secrets (for maintainers)
+
+| Secret | Value |
+|---|---|
+| `DOCKERHUB_USERNAME` | `marocainperdu` |
+| `DOCKERHUB_TOKEN` | Docker Hub access token (Account Settings > Security) |
+
+### Release a new version
+
+```sh
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+The workflow builds `marocainperdu/yams:1.0.0`, `:1.0`, `:1`, and `:latest`.
+
 ## Security
 
 - Auth is **mandatory** in `NODE_ENV=production` — the app refuses to start without it.
