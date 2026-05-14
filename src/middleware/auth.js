@@ -17,7 +17,7 @@ if (AUTH_ENABLED) {
   if (process.env.NODE_ENV === 'production') {
     throw new Error('[YAMS] NODE_ENV=production but YAMS_AUTH_ENABLED is not "true". Refusing to start.');
   }
-  console.warn('[YAMS] ⚠️  WARNING: Authentication is DISABLED. All API endpoints are unprotected. Set YAMS_AUTH_ENABLED=true in production.');
+  console.warn('[YAMS] WARNING: Authentication is DISABLED. All API endpoints are unprotected. Set YAMS_AUTH_ENABLED=true in production.');
 }
 
 // jsonwebtoken is a production dependency (npm install jsonwebtoken).

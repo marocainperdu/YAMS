@@ -5,6 +5,10 @@
 node_modules/
 .claude/
 
+# Internal AI tool artefacts
+.superpowers/
+graphify-out/
+
 # Database files
 yams.db
 yams.db-wal

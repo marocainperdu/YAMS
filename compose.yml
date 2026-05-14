@@ -1,39 +1,32 @@
 services:
   yams:
     build: .
-    ports:
-      - "3000:3000"   # HTTP API + static frontend + WebSocket (all on one port)
+    # host networking lets Minecraft servers bind their ports (25565, 25566, …)
+    # without declaring a fixed port range in advance.
+    network_mode: host
     volumes:
-      - ./servers:/app/servers   # bind mount — place server.jar files here from the host
-      - yams_data:/app/data      # named volume — SQLite database
-    env_file:
-      - .env
+      - yams-data:/app/data      # yams.db + SQLite WAL files
+      - yams-servers:/app/servers # server JARs, worlds, configs, backups
     environment:
-      - PORT=3000
-      - YAMS_DB=/app/data/yams.db
-      - YAMS_SERVERS_ROOT=/app/servers
-      - NODE_ENV=production
+      NODE_ENV: production
+      PORT: 3000
+      # Binds to localhost only by default — access YAMS from the same machine.
+      # Set BIND_ADDRESS=0.0.0.0 (via .env) to expose it on the network,
+      # then put a TLS reverse-proxy (Caddy, nginx) in front of it.
+      BIND_ADDRESS: ${BIND_ADDRESS:-127.0.0.1}
+      YAMS_AUTH_ENABLED: "true"
+      JWT_SECRET: ${JWT_SECRET}
+      YAMS_ADMIN_USERNAME: ${YAMS_ADMIN_USERNAME}
+      YAMS_ADMIN_PASSWORD: ${YAMS_ADMIN_PASSWORD}
     restart: unless-stopped
 
-    # Memory ceiling — adjust upward if you run many/large Minecraft servers.
-    # Each server consumes RAM equal to its configured -Xmx value on top of YAMS itself.
-    deploy:
-      resources:
-        limits:
-          memory: 4g
-
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:3000/metrics"]
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/health"]
       interval: 30s
       timeout: 5s
       retries: 3
       start_period: 10s
 
-# ── Minecraft server ports ────────────────────────────────────────────────────
-# Uncomment and extend if you want players to connect from outside the host.
-# Each Minecraft server must have a unique port configured in YAMS.
-#
-#     - "25565:25565"   # default Minecraft port
-
 volumes:
-  yams_data:   # persists the SQLite database across restarts and image rebuilds
+  yams-data:
+  yams-servers:
