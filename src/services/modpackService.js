@@ -310,8 +310,11 @@ async function installPack(server, packInfo) {
       for (const { fileId, projectId } of descriptor.files) {
         const info = urlMap.get(fileId);
         if (!info?.downloadUrl) {
-          const label = info?.fileName ?? info?.displayName ?? `project ${projectId}`;
-          skippedMods.push(label);
+          skippedMods.push({
+            name:      info?.fileName ?? info?.displayName ?? `project ${projectId}`,
+            projectId,
+            fileId,
+          });
           continue;
         }
         modFiles.push({
@@ -363,7 +366,7 @@ async function installPack(server, packInfo) {
 
     console.log(`[YAMS] Modpack installed successfully for server '${server.name}' (${total} mods)`);
     if (skippedMods.length > 0) {
-      console.warn(`[YAMS] ${skippedMods.length} mod(s) skipped (distribution-restricted): ${skippedMods.join(', ')}`);
+      console.warn(`[YAMS] ${skippedMods.length} mod(s) skipped (distribution-restricted): ${skippedMods.map(m => m.name).join(', ')}`);
     }
 
   } catch (err) {

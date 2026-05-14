@@ -585,7 +585,8 @@ function ModpackInstallProgress({ serverId, serverName, packName, onDone }) {
   const [total, setTotal]     = React.useState(0)
   const [error, setError]     = React.useState(null)
   const [done, setDone]       = React.useState(false)
-  const [skipped, setSkipped] = React.useState([])
+  const [skipped, setSkipped] = React.useState([])   // [{name, projectId, fileId}]
+  const [manualPhase, setManualPhase] = React.useState(false)
   const wsRef = React.useRef(null)
 
   React.useEffect(() => {
@@ -594,52 +595,35 @@ function ModpackInstallProgress({ serverId, serverName, packName, onDone }) {
     const ws = new WebSocket(url)
     wsRef.current = ws
 
-    ws.onopen = () => {
-      ws.send(JSON.stringify({ action: 'subscribe', serverId }))
-    }
+    ws.onopen = () => ws.send(JSON.stringify({ action: 'subscribe', serverId }))
 
     ws.onmessage = e => {
       let msg
       try { msg = JSON.parse(e.data) } catch { return }
 
       if (msg.type === 'status' && msg.data === 'installing') {
-        setStep('installing')
-        setMessage('Preparing installation…')
+        setStep('installing'); setMessage('Preparing installation…')
       }
-
       if (msg.type === 'install_progress') {
         setStep(msg.step)
         if (msg.step === 'downloading_mods') {
-          setCurrent(msg.current ?? 0)
-          setTotal(msg.total ?? 0)
+          setCurrent(msg.current ?? 0); setTotal(msg.total ?? 0)
           setMessage(`Downloading mods (${msg.current}/${msg.total})${msg.name ? ` — ${msg.name}` : ''}`)
         } else {
           setMessage(msg.message ?? msg.step)
         }
       }
-
       if (msg.type === 'install_complete') {
-        setStep('complete')
-        setMessage('Installation complete!')
-        setDone(true)
+        setStep('complete'); setMessage('Installation complete!'); setDone(true)
         setSkipped(msg.skippedMods ?? [])
         ws.close()
       }
-
-      if (msg.type === 'install_error') {
-        setError(msg.message)
-        ws.close()
-      }
-
-      if (msg.type === 'install_cancelled') {
-        setError('Installation was cancelled.')
-        ws.close()
-      }
+      if (msg.type === 'install_error') { setError(msg.message); ws.close() }
+      if (msg.type === 'install_cancelled') { setError('Installation was cancelled.'); ws.close() }
     }
 
     ws.onclose = () => {}
     ws.onerror = () => setError('WebSocket connection failed.')
-
     return () => ws.close()
   }, [serverId])
 
@@ -649,18 +633,17 @@ function ModpackInstallProgress({ serverId, serverName, packName, onDone }) {
     onDone && onDone()
   }
 
+  function openDownloadTabs() {
+    for (const mod of skipped) {
+      window.open(`https://www.curseforge.com/projects/${mod.projectId}`, '_blank')
+    }
+    setManualPhase(true)
+  }
+
   const pct = total > 0 ? Math.round((current / total) * 100) : (done ? 100 : 0)
 
-  const stepLabels = {
-    connecting:         'Connecting…',
-    installing:         'Preparing…',
-    downloading_pack:   'Downloading modpack archive…',
-    extracting:         'Extracting…',
-    installing_loader:  'Installing mod loader…',
-    resolving_mods:     'Resolving mod download URLs…',
-    downloading_mods:   `Downloading mods…`,
-    copying_overrides:  'Copying overrides…',
-    complete:           'Done!',
+  if (manualPhase) {
+    return <ModUploadZone serverId={serverId} mods={skipped} onDone={onDone} />
   }
 
   return (
@@ -672,11 +655,7 @@ function ModpackInstallProgress({ serverId, serverName, packName, onDone }) {
       {!error && (
         <>
           <div style={{ width: '100%', background: C.surface2, borderRadius: 4, height: 6, overflow: 'hidden' }}>
-            <div style={{
-              height: '100%', borderRadius: 4, background: done ? C.green : C.blue,
-              width: `${pct}%`,
-              transition: 'width 400ms ease',
-            }} />
+            <div style={{ height: '100%', borderRadius: 4, background: done ? C.green : C.blue, width: `${pct}%`, transition: 'width 400ms ease' }} />
           </div>
           <div style={{ fontSize: 12, color: C.muted, textAlign: 'center', minHeight: 18 }}>{message}</div>
         </>
@@ -688,27 +667,41 @@ function ModpackInstallProgress({ serverId, serverName, packName, onDone }) {
         </div>
       )}
 
-      {skipped.length > 0 && (
-        <div style={{ width: '100%', background: `${C.amber}12`, border: `1px solid ${C.amber}44`, borderRadius: 8, padding: '14px 16px', fontSize: 12 }}>
-          <div style={{ fontWeight: 600, color: C.amber, marginBottom: 6 }}>
-            {skipped.length} mod{skipped.length > 1 ? 's' : ''} could not be downloaded automatically
+      {done && skipped.length > 0 && (
+        <div style={{ width: '100%', background: `${C.amber}12`, border: `1px solid ${C.amber}44`, borderRadius: 8, padding: '16px' }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: C.amber, marginBottom: 6 }}>
+            {skipped.length} mod{skipped.length > 1 ? 's' : ''} need manual installation
           </div>
-          <div style={{ color: C.muted, lineHeight: 1.7, marginBottom: 8 }}>
-            These mods are distribution-restricted — the authors have opted out of third-party downloads.
-            You'll need to install them manually via the file manager.
+          <div style={{ fontSize: 12, color: C.muted, lineHeight: 1.6, marginBottom: 12 }}>
+            These mods are distribution-restricted — CurseForge requires you to download them directly.
+            Click below to open each mod's page, then drop the downloaded <code>.jar</code> files here.
           </div>
-          <ul style={{ margin: 0, padding: '0 0 0 16px', color: C.muted }}>
-            {skipped.map((name, i) => <li key={i} style={{ fontFamily: 'monospace', fontSize: 11 }}>{name}</li>)}
+          <ul style={{ margin: '0 0 14px 0', padding: '0 0 0 16px' }}>
+            {skipped.map((m, i) => (
+              <li key={i} style={{ fontSize: 11, fontFamily: 'monospace', color: C.muted, lineHeight: 1.8 }}>{m.name}</li>
+            ))}
           </ul>
+          <button onClick={openDownloadTabs} style={{
+            width: '100%', padding: '9px 0', borderRadius: 7, border: 'none',
+            background: C.amber, color: '#0d1117', fontSize: 13, fontWeight: 700, cursor: 'pointer',
+          }}>
+            Open {skipped.length} download tab{skipped.length > 1 ? 's' : ''} + upload mods →
+          </button>
         </div>
       )}
 
-      <div style={{ display: 'flex', gap: 12, marginTop: 8 }}>
-        {done && (
+      <div style={{ display: 'flex', gap: 12 }}>
+        {done && skipped.length === 0 && (
           <button onClick={() => onDone && onDone()} style={{
             padding: '9px 28px', borderRadius: 7, border: 'none',
             background: C.green, color: '#0d1117', fontSize: 13, fontWeight: 700, cursor: 'pointer',
           }}>Go to server →</button>
+        )}
+        {done && skipped.length > 0 && (
+          <button onClick={() => onDone && onDone()} style={{
+            padding: '9px 22px', borderRadius: 7, border: `1px solid ${C.border}`,
+            background: 'none', color: C.muted, fontSize: 13, cursor: 'pointer',
+          }}>Skip — go to server</button>
         )}
         {error && (
           <button onClick={() => onDone && onDone()} style={{
@@ -721,6 +714,125 @@ function ModpackInstallProgress({ serverId, serverName, packName, onDone }) {
             padding: '9px 20px', borderRadius: 7, border: `1px solid ${C.red}44`,
             background: `${C.red}0d`, color: C.red, fontSize: 12, cursor: 'pointer',
           }}>Cancel installation</button>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ── Drag-and-drop mod uploader ────────────────────────────────────────────────
+
+function ModUploadZone({ serverId, mods, onDone }) {
+  const [uploads, setUploads] = React.useState(
+    () => mods.map(m => ({ ...m, status: 'pending' }))   // pending | uploading | done | error
+  )
+  const [dragging, setDragging] = React.useState(false)
+
+  const allDone = uploads.every(u => u.status === 'done')
+
+  async function uploadFile(file) {
+    const form = new FormData()
+    form.append('file', file)
+    const token = sessionStorage.getItem('yams_token') ?? ''
+    const res = await fetch(`/api/servers/${serverId}/mods/upload`, {
+      method: 'POST',
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      body: form,
+    })
+    if (!res.ok) throw new Error(`Upload failed (${res.status})`)
+  }
+
+  async function handleFiles(files) {
+    for (const file of files) {
+      if (!file.name.endsWith('.jar')) continue
+      const modName = file.name
+      setUploads(prev => prev.map(u =>
+        u.name === modName ? { ...u, status: 'uploading' } : u
+      ))
+      try {
+        await uploadFile(file)
+        setUploads(prev => prev.map(u =>
+          u.name === modName ? { ...u, status: 'done' } : u
+        ))
+      } catch (err) {
+        setUploads(prev => prev.map(u =>
+          u.name === modName ? { ...u, status: 'error', errorMsg: err.message } : u
+        ))
+      }
+    }
+  }
+
+  function onDrop(e) {
+    e.preventDefault(); setDragging(false)
+    handleFiles(Array.from(e.dataTransfer.files))
+  }
+
+  const statusIcon  = { pending: '○', uploading: '↑', done: '✓', error: '✕' }
+  const statusColor = { pending: C.dim, uploading: C.blue, done: C.green, error: C.red }
+
+  return (
+    <div style={{ maxWidth: 560, margin: '0 auto', padding: '32px 24px', display: 'flex', flexDirection: 'column', gap: 20 }}>
+      <div>
+        <div style={{ fontSize: 15, fontWeight: 700, color: C.text, marginBottom: 6 }}>Upload missing mods</div>
+        <div style={{ fontSize: 12, color: C.muted, lineHeight: 1.6 }}>
+          Download each mod from the browser tabs that just opened, then drag the <code>.jar</code> files into the zone below.
+        </div>
+      </div>
+
+      {/* Drop zone */}
+      <div
+        onDragOver={e => { e.preventDefault(); setDragging(true) }}
+        onDragLeave={() => setDragging(false)}
+        onDrop={onDrop}
+        style={{
+          border: `2px dashed ${dragging ? C.blue : C.border}`,
+          borderRadius: 10, padding: '40px 24px', textAlign: 'center',
+          background: dragging ? `${C.blue}0a` : C.surface2,
+          transition: 'all 150ms', cursor: 'pointer',
+        }}
+        onClick={() => document.getElementById('mod-file-input').click()}
+      >
+        <div style={{ fontSize: 28, marginBottom: 8 }}>📦</div>
+        <div style={{ fontSize: 13, color: dragging ? C.blue : C.muted, fontWeight: 500 }}>
+          {dragging ? 'Drop .jar files here' : 'Drag & drop .jar files here, or click to browse'}
+        </div>
+        <input
+          id="mod-file-input" type="file" accept=".jar" multiple
+          style={{ display: 'none' }}
+          onChange={e => { handleFiles(Array.from(e.target.files)); e.target.value = '' }}
+        />
+      </div>
+
+      {/* Mod checklist */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        {uploads.map((u, i) => (
+          <div key={i} style={{
+            display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px',
+            borderRadius: 7, background: C.surface2, border: `1px solid ${u.status === 'done' ? `${C.green}44` : C.border}`,
+          }}>
+            <span style={{ fontSize: 14, color: statusColor[u.status], flexShrink: 0, fontWeight: 700 }}>
+              {statusIcon[u.status]}
+            </span>
+            <span style={{ flex: 1, fontSize: 12, fontFamily: 'monospace', color: u.status === 'done' ? C.text : C.muted }}>
+              {u.name}
+            </span>
+            {u.status === 'uploading' && <span style={{ fontSize: 11, color: C.blue }}>Uploading…</span>}
+            {u.status === 'error' && <span style={{ fontSize: 11, color: C.red }}>{u.errorMsg}</span>}
+            {u.status === 'done' && <span style={{ fontSize: 11, color: C.green }}>Uploaded</span>}
+          </div>
+        ))}
+      </div>
+
+      <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+        <button onClick={() => onDone && onDone()} style={{
+          padding: '9px 22px', borderRadius: 7, border: `1px solid ${C.border}`,
+          background: 'none', color: C.muted, fontSize: 13, cursor: 'pointer',
+        }}>Skip remaining</button>
+        {allDone && (
+          <button onClick={() => onDone && onDone()} style={{
+            padding: '9px 28px', borderRadius: 7, border: 'none',
+            background: C.green, color: '#0d1117', fontSize: 13, fontWeight: 700, cursor: 'pointer',
+          }}>Go to server →</button>
         )}
       </div>
     </div>
