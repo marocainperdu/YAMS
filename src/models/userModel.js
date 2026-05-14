@@ -20,6 +20,15 @@ function getStmts() {
       count: db.prepare(
         `SELECT COUNT(*) AS n FROM users`
       ),
+      findAll: db.prepare(
+        `SELECT id, username, role, created_at FROM users ORDER BY created_at ASC`
+      ),
+      updateRole: db.prepare(
+        `UPDATE users SET role = ? WHERE id = ?`
+      ),
+      remove: db.prepare(
+        `DELETE FROM users WHERE id = ?`
+      ),
       incrementTokenVersion: db.prepare(
         `UPDATE users SET token_version = token_version + 1 WHERE id = ?`
       ),
@@ -45,8 +54,21 @@ function count() {
   return getStmts().count.get().n;
 }
 
+function findAll() {
+  return getStmts().findAll.all();
+}
+
+function updateRole(id, role) {
+  getStmts().updateRole.run(role, id);
+  return findById(id);
+}
+
+function remove(id) {
+  getStmts().remove.run(id);
+}
+
 function incrementTokenVersion(id) {
   getStmts().incrementTokenVersion.run(id);
 }
 
-module.exports = { create, findById, findByUsername, count, incrementTokenVersion };
+module.exports = { create, findById, findByUsername, count, findAll, updateRole, remove, incrementTokenVersion };

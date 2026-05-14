@@ -72,6 +72,31 @@ function migrate(db) {
       created_at  TEXT    NOT NULL DEFAULT (datetime('now'))
     );
   `);
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS webhooks (
+      id         TEXT    PRIMARY KEY,
+      server_id  TEXT    NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+      url        TEXT    NOT NULL,
+      events     TEXT    NOT NULL DEFAULT 'server.start,server.stop,server.crash',
+      secret     TEXT,
+      enabled    INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT    NOT NULL DEFAULT (datetime('now'))
+    );
+  `);
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS schedules (
+      id          TEXT    PRIMARY KEY,
+      server_id   TEXT    NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+      name        TEXT    NOT NULL,
+      cron        TEXT    NOT NULL,
+      command     TEXT    NOT NULL,
+      enabled     INTEGER NOT NULL DEFAULT 1,
+      last_run_at TEXT,
+      created_at  TEXT    NOT NULL DEFAULT (datetime('now'))
+    );
+  `);
 }
 
 module.exports = { getDb };

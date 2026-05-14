@@ -769,33 +769,174 @@ function TabMetrics({ serverId }) {
   );
 }
 
-// ─── TabScheduler (static placeholder) ───────────────────────────────────────
-function TabScheduler() {
-  const tasks = [
-    { name: 'Daily Restart',    cron: '0 4 * * *',    last: '—', enabled: true  },
-    { name: 'Auto Save',        cron: '*/30 * * * *', last: '—', enabled: true  },
-    { name: 'Announce Restart', cron: '55 3 * * *',   last: '—', enabled: true  },
-    { name: 'Clear Lag',        cron: '0 * * * *',    last: '—', enabled: false },
-  ];
-  const [states, setStates] = React.useState(tasks.map(t => t.enabled));
+// ─── ScheduleModal ────────────────────────────────────────────────────────────
+function ScheduleModal({ schedule, onClose, onSave }) {
+  const [name,    setName]    = React.useState(schedule?.name    ?? '');
+  const [cron,    setCron]    = React.useState(schedule?.cron    ?? '');
+  const [command, setCommand] = React.useState(schedule?.command ?? '');
+  const [enabled, setEnabled] = React.useState(schedule ? !!schedule.enabled : true);
+  const [loading, setLoading] = React.useState(false);
+  const [error,   setError]   = React.useState(null);
+
+  async function submit(e) {
+    e.preventDefault();
+    setLoading(true); setError(null);
+    const err = await onSave(
+      { name: name.trim(), cron: cron.trim(), command: command.trim(), enabled },
+      schedule?.id ?? null,
+    );
+    if (err) { setError(err); setLoading(false); }
+  }
+
+  const inp = { background: C.surface2, border: `1px solid ${C.border}`, borderRadius: 6, padding: '8px 12px', fontSize: 13, color: C.text, outline: 'none', width: '100%' };
+  const mono = { ...inp, fontFamily: "'JetBrains Mono', monospace" };
+  const disabled = loading || !name.trim() || !cron.trim() || !command.trim();
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, zIndex: 500, background: '#00000077', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+      onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
+      <div style={{ width: 440, background: C.surface, border: `1px solid ${C.border}`, borderRadius: 12, overflow: 'hidden', boxShadow: '0 16px 48px #00000066' }}>
+        <div style={{ padding: '16px 20px', borderBottom: `1px solid ${C.border}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <span style={{ fontSize: 14, fontWeight: 600, color: C.text }}>{schedule ? 'Edit Task' : 'New Scheduled Task'}</span>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', color: C.muted, fontSize: 18, cursor: 'pointer', lineHeight: 1 }}>×</button>
+        </div>
+        <form onSubmit={submit} style={{ padding: '18px 20px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+          {error && <div style={{ background: `${C.red}12`, border: `1px solid ${C.red}44`, borderRadius: 6, padding: '8px 12px', fontSize: 12, color: C.red }}>{error}</div>}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <label style={{ fontSize: 12, fontWeight: 500, color: C.muted }}>Task name</label>
+            <input value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Daily Restart" autoFocus style={inp}
+              onFocus={e => { e.target.style.borderColor = C.blue; }} onBlur={e => { e.target.style.borderColor = C.border; }} />
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <label style={{ fontSize: 12, fontWeight: 500, color: C.muted }}>Cron expression</label>
+            <input value={cron} onChange={e => setCron(e.target.value)} placeholder="minute hour dom month dow" style={mono}
+              onFocus={e => { e.target.style.borderColor = C.blue; }} onBlur={e => { e.target.style.borderColor = C.border; }} />
+            <div style={{ fontSize: 11, color: C.dim }}>
+              e.g. <span style={{ fontFamily: 'monospace' }}>0 4 * * *</span> (4am daily) · <span style={{ fontFamily: 'monospace' }}>*/30 * * * *</span> (every 30min) · <span style={{ fontFamily: 'monospace' }}>0 * * * *</span> (hourly)
+            </div>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <label style={{ fontSize: 12, fontWeight: 500, color: C.muted }}>Command</label>
+            <input value={command} onChange={e => setCommand(e.target.value)} placeholder="say Server restarting in 5 minutes" style={mono}
+              onFocus={e => { e.target.style.borderColor = C.blue; }} onBlur={e => { e.target.style.borderColor = C.border; }} />
+            <div style={{ fontSize: 11, color: C.dim }}>Minecraft console command (no leading /)</div>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <Toggle value={enabled} onChange={setEnabled} />
+            <span style={{ fontSize: 12, color: C.muted }}>Enabled</span>
+          </div>
+          <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', paddingTop: 4 }}>
+            <button type="button" onClick={onClose} style={{ fontSize: 13, padding: '7px 14px', borderRadius: 6, border: `1px solid ${C.border}`, background: 'transparent', color: C.muted, cursor: 'pointer' }}>Cancel</button>
+            <button type="submit" disabled={disabled} style={{ fontSize: 13, fontWeight: 600, padding: '7px 16px', borderRadius: 6, border: `1px solid ${C.green}55`, background: `${C.green}18`, color: C.green, cursor: disabled ? 'default' : 'pointer', opacity: loading ? 0.6 : 1 }}>
+              {loading ? 'Saving…' : (schedule ? 'Save changes' : 'Create')}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ─── TabScheduler ─────────────────────────────────────────────────────────────
+function TabScheduler({ serverId }) {
+  const [schedules, setSchedules] = React.useState([]);
+  const [loading,   setLoading]   = React.useState(true);
+  const [apiError,  setApiError]  = React.useState(null);
+  const [modal,     setModal]     = React.useState(null); // null | 'new' | schedule object
+
+  React.useEffect(() => {
+    apiFetch(`/servers/${serverId}/schedules`)
+      .then(r => { setSchedules(r.data || []); setLoading(false); })
+      .catch(e => { setApiError(e.message); setLoading(false); });
+  }, [serverId]);
+
+  async function handleToggle(s) {
+    const prev = s.enabled;
+    setSchedules(list => list.map(x => x.id === s.id ? { ...x, enabled: prev ? 0 : 1 } : x));
+    try {
+      const res = await apiFetch(`/servers/${serverId}/schedules/${s.id}`, {
+        method: 'PATCH', body: JSON.stringify({ enabled: !prev }),
+      });
+      setSchedules(list => list.map(x => x.id === s.id ? res.data : x));
+    } catch (err) {
+      setSchedules(list => list.map(x => x.id === s.id ? { ...x, enabled: prev } : x));
+      setApiError(err.message);
+    }
+  }
+
+  async function handleDelete(id) {
+    if (!confirm('Delete this scheduled task?')) return;
+    try {
+      await apiFetch(`/servers/${serverId}/schedules/${id}`, { method: 'DELETE' });
+      setSchedules(list => list.filter(x => x.id !== id));
+    } catch (err) {
+      setApiError(err.message);
+    }
+  }
+
+  async function handleSave(fields, scheduleId) {
+    try {
+      if (scheduleId) {
+        const res = await apiFetch(`/servers/${serverId}/schedules/${scheduleId}`, {
+          method: 'PATCH', body: JSON.stringify(fields),
+        });
+        setSchedules(list => list.map(x => x.id === scheduleId ? res.data : x));
+      } else {
+        const res = await apiFetch(`/servers/${serverId}/schedules`, {
+          method: 'POST', body: JSON.stringify(fields),
+        });
+        setSchedules(list => [...list, res.data]);
+      }
+      setModal(null);
+    } catch (err) {
+      return err.message;
+    }
+  }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      {modal !== null && (
+        <ScheduleModal
+          schedule={modal === 'new' ? null : modal}
+          onClose={() => setModal(null)}
+          onSave={handleSave}
+        />
+      )}
+
+      {apiError && (
+        <div style={{ background: `${C.red}12`, border: `1px solid ${C.red}44`, borderRadius: 6, padding: '8px 14px', fontSize: 12, color: C.red }}>
+          {apiError}
+        </div>
+      )}
+
       <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-        <button style={{ fontSize: 12, fontWeight: 600, padding: '6px 14px', borderRadius: 6, border: `1px solid ${C.border}`, background: C.surface2, color: C.text, cursor: 'pointer' }}>+ New Task</button>
+        <button onClick={() => setModal('new')} style={{ fontSize: 12, fontWeight: 600, padding: '6px 14px', borderRadius: 6, border: `1px solid ${C.border}`, background: C.surface2, color: C.text, cursor: 'pointer' }}>+ New Task</button>
       </div>
-      <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, overflow: 'hidden' }}>
-        {tasks.map((t, i) => (
-          <div key={t.name} style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '12px 16px', borderBottom: i < tasks.length - 1 ? `1px solid ${C.borderLight}` : 'none' }}>
-            <Toggle value={states[i]} onChange={v => setStates(s => s.map((x, j) => j === i ? v : x))} />
-            <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 13, fontWeight: 500, color: states[i] ? C.text : C.muted }}>{t.name}</div>
-              <div style={{ fontSize: 11, color: C.dim, fontFamily: "'JetBrains Mono', monospace", marginTop: 2 }}>{t.cron}</div>
+
+      {loading
+        ? <EmptyState message="Loading schedules…" />
+        : schedules.length === 0
+          ? <EmptyState message="No scheduled tasks yet." />
+          : (
+            <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, overflow: 'hidden' }}>
+              {schedules.map((s, i) => (
+                <div key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '12px 16px', borderBottom: i < schedules.length - 1 ? `1px solid ${C.borderLight}` : 'none' }}>
+                  <Toggle value={!!s.enabled} onChange={() => handleToggle(s)} />
+                  <div style={{ flex: 1, cursor: 'pointer', minWidth: 0 }} onClick={() => setModal(s)}>
+                    <div style={{ fontSize: 13, fontWeight: 500, color: s.enabled ? C.text : C.muted }}>{s.name}</div>
+                    <div style={{ fontSize: 11, color: C.dim, fontFamily: "'JetBrains Mono', monospace", marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {s.cron} — {s.command}
+                    </div>
+                  </div>
+                  <div style={{ fontSize: 11, color: C.dim, whiteSpace: 'nowrap', flexShrink: 0 }}>
+                    {s.last_run_at ? formatRelTime(s.last_run_at) : 'Never run'}
+                  </div>
+                  <button onClick={() => handleDelete(s.id)} style={{ fontSize: 11, padding: '3px 8px', borderRadius: 4, border: `1px solid ${C.red}44`, background: 'transparent', color: C.red, cursor: 'pointer', flexShrink: 0 }}>Delete</button>
+                </div>
+              ))}
             </div>
-            <div style={{ fontSize: 11, color: C.dim }}>Last run: {t.last}</div>
-          </div>
-        ))}
-      </div>
+          )
+      }
     </div>
   );
 }
@@ -859,31 +1000,173 @@ function TabReorder({ serverId }) {
   );
 }
 
-// ─── TabWebhooks (static placeholder) ────────────────────────────────────────
-function TabWebhooks() {
-  const hooks = [
-    { url: 'https://discord.com/api/webhooks/…/token', events: ['server.start', 'server.stop', 'player.join'], active: true  },
-    { url: 'https://hooks.slack.com/services/…',       events: ['server.crash'],                               active: false },
-  ];
+// ─── WebhookModal ─────────────────────────────────────────────────────────────
+const ALL_EVENTS = ['server.start', 'server.stop', 'server.crash'];
+
+function WebhookModal({ hook, onClose, onSave }) {
+  const [url,     setUrl]     = React.useState(hook?.url     ?? '');
+  const [events,  setEvents]  = React.useState(hook?.events  ?? [...ALL_EVENTS]);
+  const [secret,  setSecret]  = React.useState(hook?.secret  ?? '');
+  const [enabled, setEnabled] = React.useState(hook ? !!hook.enabled : true);
+  const [loading, setLoading] = React.useState(false);
+  const [error,   setError]   = React.useState(null);
+
+  function toggleEvent(ev) {
+    setEvents(prev => prev.includes(ev) ? prev.filter(e => e !== ev) : [...prev, ev]);
+  }
+
+  async function submit(e) {
+    e.preventDefault();
+    setLoading(true); setError(null);
+    const err = await onSave(
+      { url: url.trim(), events, secret: secret.trim() || null, enabled },
+      hook?.id ?? null,
+    );
+    if (err) { setError(err); setLoading(false); }
+  }
+
+  const inp = { background: C.surface2, border: `1px solid ${C.border}`, borderRadius: 6, padding: '8px 12px', fontSize: 13, color: C.text, outline: 'none', width: '100%' };
+  const disabled = loading || !url.trim() || events.length === 0;
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-      <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-        <button style={{ fontSize: 12, fontWeight: 600, padding: '6px 14px', borderRadius: 6, border: `1px solid ${C.border}`, background: C.surface2, color: C.text, cursor: 'pointer' }}>+ Add Webhook</button>
-      </div>
-      {hooks.map((h, i) => (
-        <div key={i} style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 10 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <span style={{ width: 7, height: 7, borderRadius: '50%', background: h.active ? C.green : C.dim, flexShrink: 0 }} />
-            <span style={{ fontSize: 12, fontFamily: "'JetBrains Mono', monospace", color: C.text, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{h.url}</span>
-            <button style={{ fontSize: 11, padding: '2px 8px', borderRadius: 3, border: `1px solid ${C.border}`, background: 'transparent', color: C.muted, cursor: 'pointer', flexShrink: 0 }}>Edit</button>
+    <div style={{ position: 'fixed', inset: 0, zIndex: 500, background: '#00000077', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+      onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
+      <div style={{ width: 440, background: C.surface, border: `1px solid ${C.border}`, borderRadius: 12, overflow: 'hidden', boxShadow: '0 16px 48px #00000066' }}>
+        <div style={{ padding: '16px 20px', borderBottom: `1px solid ${C.border}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <span style={{ fontSize: 14, fontWeight: 600, color: C.text }}>{hook ? 'Edit Webhook' : 'Add Webhook'}</span>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', color: C.muted, fontSize: 18, cursor: 'pointer', lineHeight: 1 }}>×</button>
+        </div>
+        <form onSubmit={submit} style={{ padding: '18px 20px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+          {error && <div style={{ background: `${C.red}12`, border: `1px solid ${C.red}44`, borderRadius: 6, padding: '8px 12px', fontSize: 12, color: C.red }}>{error}</div>}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <label style={{ fontSize: 12, fontWeight: 500, color: C.muted }}>URL</label>
+            <input value={url} onChange={e => setUrl(e.target.value)} placeholder="https://discord.com/api/webhooks/…" autoFocus style={inp}
+              onFocus={e => { e.target.style.borderColor = C.blue; }} onBlur={e => { e.target.style.borderColor = C.border; }} />
           </div>
-          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-            {h.events.map(ev => (
-              <span key={ev} style={{ fontSize: 10, padding: '2px 7px', borderRadius: 3, background: C.surface2, border: `1px solid ${C.border}`, color: C.muted, fontFamily: "'JetBrains Mono', monospace" }}>{ev}</span>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <label style={{ fontSize: 12, fontWeight: 500, color: C.muted }}>Events</label>
+            {ALL_EVENTS.map(ev => (
+              <label key={ev} style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+                <input type="checkbox" checked={events.includes(ev)} onChange={() => toggleEvent(ev)}
+                  style={{ accentColor: C.blue, width: 14, height: 14 }} />
+                <span style={{ fontSize: 12, fontFamily: "'JetBrains Mono', monospace", color: C.text }}>{ev}</span>
+              </label>
             ))}
           </div>
-        </div>
-      ))}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <label style={{ fontSize: 12, fontWeight: 500, color: C.muted }}>Secret <span style={{ color: C.dim, fontWeight: 400 }}>(optional)</span></label>
+            <input value={secret} onChange={e => setSecret(e.target.value)} placeholder="Used to sign requests with X-YAMS-Signature" style={inp}
+              onFocus={e => { e.target.style.borderColor = C.blue; }} onBlur={e => { e.target.style.borderColor = C.border; }} />
+            <div style={{ fontSize: 11, color: C.dim }}>If set, each request includes <span style={{ fontFamily: 'monospace' }}>X-YAMS-Signature: sha256=…</span></div>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <Toggle value={enabled} onChange={setEnabled} />
+            <span style={{ fontSize: 12, color: C.muted }}>Enabled</span>
+          </div>
+          <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', paddingTop: 4 }}>
+            <button type="button" onClick={onClose} style={{ fontSize: 13, padding: '7px 14px', borderRadius: 6, border: `1px solid ${C.border}`, background: 'transparent', color: C.muted, cursor: 'pointer' }}>Cancel</button>
+            <button type="submit" disabled={disabled} style={{ fontSize: 13, fontWeight: 600, padding: '7px 16px', borderRadius: 6, border: `1px solid ${C.green}55`, background: `${C.green}18`, color: C.green, cursor: disabled ? 'default' : 'pointer', opacity: loading ? 0.6 : 1 }}>
+              {loading ? 'Saving…' : (hook ? 'Save changes' : 'Add Webhook')}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ─── TabWebhooks ──────────────────────────────────────────────────────────────
+function TabWebhooks({ serverId }) {
+  const [hooks,    setHooks]   = React.useState([]);
+  const [loading,  setLoading] = React.useState(true);
+  const [apiError, setApiError]= React.useState(null);
+  const [modal,    setModal]   = React.useState(null); // null | 'new' | hook object
+
+  React.useEffect(() => {
+    apiFetch(`/servers/${serverId}/webhooks`)
+      .then(r => { setHooks(r.data || []); setLoading(false); })
+      .catch(e => { setApiError(e.message); setLoading(false); });
+  }, [serverId]);
+
+  async function handleToggle(h) {
+    const prev = h.enabled;
+    setHooks(list => list.map(x => x.id === h.id ? { ...x, enabled: !prev } : x));
+    try {
+      const res = await apiFetch(`/servers/${serverId}/webhooks/${h.id}`, {
+        method: 'PATCH', body: JSON.stringify({ enabled: !prev }),
+      });
+      setHooks(list => list.map(x => x.id === h.id ? res.data : x));
+    } catch (err) {
+      setHooks(list => list.map(x => x.id === h.id ? { ...x, enabled: prev } : x));
+      setApiError(err.message);
+    }
+  }
+
+  async function handleDelete(id) {
+    if (!confirm('Delete this webhook?')) return;
+    try {
+      await apiFetch(`/servers/${serverId}/webhooks/${id}`, { method: 'DELETE' });
+      setHooks(list => list.filter(x => x.id !== id));
+    } catch (err) { setApiError(err.message); }
+  }
+
+  async function handleSave(fields, hookId) {
+    try {
+      if (hookId) {
+        const res = await apiFetch(`/servers/${serverId}/webhooks/${hookId}`, {
+          method: 'PATCH', body: JSON.stringify(fields),
+        });
+        setHooks(list => list.map(x => x.id === hookId ? res.data : x));
+      } else {
+        const res = await apiFetch(`/servers/${serverId}/webhooks`, {
+          method: 'POST', body: JSON.stringify(fields),
+        });
+        setHooks(list => [...list, res.data]);
+      }
+      setModal(null);
+    } catch (err) { return err.message; }
+  }
+
+  const eventColor = { 'server.start': C.green, 'server.stop': C.muted, 'server.crash': C.red };
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      {modal !== null && (
+        <WebhookModal
+          hook={modal === 'new' ? null : modal}
+          onClose={() => setModal(null)}
+          onSave={handleSave}
+        />
+      )}
+
+      {apiError && (
+        <div style={{ background: `${C.red}12`, border: `1px solid ${C.red}44`, borderRadius: 6, padding: '8px 14px', fontSize: 12, color: C.red }}>{apiError}</div>
+      )}
+
+      <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+        <button onClick={() => setModal('new')} style={{ fontSize: 12, fontWeight: 600, padding: '6px 14px', borderRadius: 6, border: `1px solid ${C.border}`, background: C.surface2, color: C.text, cursor: 'pointer' }}>+ Add Webhook</button>
+      </div>
+
+      {loading
+        ? <EmptyState message="Loading webhooks…" />
+        : hooks.length === 0
+          ? <EmptyState message="No webhooks configured. Add one to get notified on server events." />
+          : hooks.map(h => (
+            <div key={h.id} style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, padding: '14px 18px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <Toggle value={!!h.enabled} onChange={() => handleToggle(h)} />
+                <span style={{ fontSize: 12, fontFamily: "'JetBrains Mono', monospace", color: C.text, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{h.url}</span>
+                <button onClick={() => setModal(h)} style={{ fontSize: 11, padding: '3px 8px', borderRadius: 4, border: `1px solid ${C.border}`, background: 'transparent', color: C.muted, cursor: 'pointer', flexShrink: 0 }}>Edit</button>
+                <button onClick={() => handleDelete(h.id)} style={{ fontSize: 11, padding: '3px 8px', borderRadius: 4, border: `1px solid ${C.red}44`, background: 'transparent', color: C.red, cursor: 'pointer', flexShrink: 0 }}>Delete</button>
+              </div>
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                {h.events.map(ev => (
+                  <span key={ev} style={{ fontSize: 10, padding: '2px 7px', borderRadius: 3, background: C.surface2, border: `1px solid ${(eventColor[ev] ?? C.muted) + '44'}`, color: eventColor[ev] ?? C.muted, fontFamily: "'JetBrains Mono', monospace" }}>{ev}</span>
+                ))}
+              </div>
+            </div>
+          ))
+      }
     </div>
   );
 }
@@ -975,9 +1258,9 @@ function ServerPage({ serverId, navigate }) {
     files:      <TabFiles     serverId={serverId} />,
     backups:    <TabBackups   serverId={serverId} />,
     metrics:    <TabMetrics   serverId={serverId} />,
-    scheduler:  <TabScheduler />,
+    scheduler:  <TabScheduler serverId={serverId} />,
     reorder:    <TabReorder   serverId={serverId} />,
-    webhooks:   <TabWebhooks  />,
+    webhooks:   <TabWebhooks  serverId={serverId} />,
     prometheus: <TabPrometheus serverId={serverId} />,
   };
 
