@@ -40,6 +40,13 @@ function ProfileTab({ currentUser, onUpdate }) {
   const [loading, setLoading] = React.useState(false)
   const [error, setError] = React.useState(null)
 
+  React.useEffect(() => {
+    apiFetch('/auth/me').then(res => {
+      if (res.data?.username) setName(res.data.username)
+      if (res.data?.email) setEmail(res.data.email)
+    }).catch(() => {})
+  }, [])
+
   async function handleSave(e) {
     e.preventDefault()
     setError(null)
