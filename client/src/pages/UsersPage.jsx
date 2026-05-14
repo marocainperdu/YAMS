@@ -2,26 +2,24 @@ import React from 'react'
 import { apiFetch, C, EmptyState } from '../lib/yamsShared'
 
 const ROLES = {
-  admin: { label: 'Admin', color: '#a371f7', desc: 'Full access to everything' },
+  admin:    { label: 'Admin',    color: '#a371f7', desc: 'Full access to everything' },
   operator: { label: 'Operator', color: '#388bfd', desc: 'Can manage servers & consoles' },
-  moderator: { label: 'Moderator', color: '#d29922', desc: 'Can manage worlds & files' },
-  viewer: { label: 'Viewer', color: '#8b949e', desc: 'Read-only access' },
+  user:     { label: 'User',     color: '#8b949e', desc: 'Read-only access' },
 }
 
 const PERMISSIONS = [
-  { id: 'start_stop', label: 'Start / Stop servers' },
-  { id: 'console', label: 'Access console' },
-  { id: 'worlds', label: 'Manage worlds & files' },
+  { id: 'start_stop',    label: 'Start / Stop servers' },
+  { id: 'console',       label: 'Access console' },
+  { id: 'worlds',        label: 'Manage worlds & files' },
   { id: 'create_delete', label: 'Create / delete servers' },
-  { id: 'manage_users', label: 'Manage other users' },
-  { id: 'view_only', label: 'View-only mode' },
+  { id: 'manage_users',  label: 'Manage other users' },
+  { id: 'view_only',     label: 'View-only mode' },
 ]
 
 const ROLE_PERMS = {
-  admin: ['start_stop', 'console', 'worlds', 'create_delete', 'manage_users'],
+  admin:    ['start_stop', 'console', 'worlds', 'create_delete', 'manage_users'],
   operator: ['start_stop', 'console', 'worlds'],
-  moderator: ['console', 'worlds'],
-  viewer: ['view_only'],
+  user:     ['view_only'],
 }
 
 
@@ -92,22 +90,21 @@ function Modal({ onClose, children }) {
 }
 
 function InviteModal({ onClose, onInvite }) {
-  const [email, setEmail] = React.useState('')
+  const [username, setUsername] = React.useState('')
   const [password, setPassword] = React.useState('')
-  const [role, setRole] = React.useState('user')
+  const [role, setRole] = React.useState('operator')
   const [loading, setLoading] = React.useState(false)
   const [error, setError] = React.useState(null)
   const [done, setDone] = React.useState(false)
 
   async function submit(e) {
     e.preventDefault()
-    if (!email.trim() || !password) { setError('Email and password are required.'); return }
+    if (!username.trim() || !password) { setError('Username and password are required.'); return }
     setLoading(true); setError(null)
     try {
-      const backendRole = role === 'admin' ? 'admin' : 'user'
       const res = await apiFetch('/users', {
         method: 'POST',
-        body: JSON.stringify({ email: email.trim(), password, role: backendRole }),
+        body: JSON.stringify({ username: username.trim(), password, role }),
       })
       setDone(true)
       setTimeout(() => { onInvite(res.data); onClose() }, 900)
@@ -131,22 +128,19 @@ function InviteModal({ onClose, onInvite }) {
         {done
           ? <div style={{ padding: '32px 24px', textAlign: 'center', color: C.green }}>
             <div style={{ fontSize: 28, marginBottom: 8 }}>✓</div>
-            <div style={{ fontWeight: 600, fontSize: 14 }}>User created: {email}</div>
+            <div style={{ fontWeight: 600, fontSize: 14 }}>User created: {username}</div>
           </div>
           : <form onSubmit={submit} style={{ padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 16 }}>
             {error && <div style={{ background: `${C.red}12`, border: `1px solid ${C.red}44`, borderRadius: 6, padding: '8px 12px', fontSize: 12, color: C.red }}>{error}</div>}
-            <div style={{ background: `${C.amber}10`, border: `1px solid ${C.amber}44`, borderRadius: 6, padding: '8px 12px', fontSize: 11, color: C.amber }}>
-              Backend supports <strong>admin</strong> and <strong>user</strong> roles only. Operator/moderator/viewer map to "user".
-            </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              <label style={{ fontSize: 12, fontWeight: 500, color: C.muted }}>Email address</label>
-              <input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="user@example.com" autoFocus style={inp}
+              <label style={{ fontSize: 12, fontWeight: 500, color: C.muted }}>Username</label>
+              <input type="text" value={username} onChange={e => setUsername(e.target.value)} placeholder="At least 3 characters" autoFocus style={inp}
                 onFocus={e => { e.target.style.borderColor = C.blue }}
                 onBlur={e => { e.target.style.borderColor = C.border }} />
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
               <label style={{ fontSize: 12, fontWeight: 500, color: C.muted }}>Initial password</label>
-              <input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="Min. 6 characters" style={inp}
+              <input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="Min. 8 characters" style={inp}
                 onFocus={e => { e.target.style.borderColor = C.blue }}
                 onBlur={e => { e.target.style.borderColor = C.border }} />
             </div>
@@ -156,7 +150,7 @@ function InviteModal({ onClose, onInvite }) {
             </div>
             <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', paddingTop: 4 }}>
               <button type="button" onClick={onClose} style={{ fontSize: 13, padding: '7px 14px', borderRadius: 6, border: `1px solid ${C.border}`, background: 'transparent', color: C.muted, cursor: 'pointer' }}>Cancel</button>
-              <button type="submit" disabled={loading || !email.trim() || !password} style={{ fontSize: 13, fontWeight: 600, padding: '7px 16px', borderRadius: 6, border: `1px solid ${C.blue}55`, background: `${C.blue}18`, color: C.blue, cursor: (loading || !email.trim() || !password) ? 'default' : 'pointer', opacity: loading ? 0.6 : 1 }}>
+              <button type="submit" disabled={loading || !username.trim() || !password} style={{ fontSize: 13, fontWeight: 600, padding: '7px 16px', borderRadius: 6, border: `1px solid ${C.blue}55`, background: `${C.blue}18`, color: C.blue, cursor: (loading || !username.trim() || !password) ? 'default' : 'pointer', opacity: loading ? 0.6 : 1 }}>
                 {loading ? 'Creating…' : 'Create User'}
               </button>
             </div>
@@ -176,8 +170,7 @@ function EditRoleModal({ user, onClose, onSave }) {
         <div style={{ padding: '18px 24px', borderBottom: `1px solid ${C.border}`, display: 'flex', alignItems: 'center', gap: 12 }}>
           <UserAvatar user={user} size={36} />
           <div>
-            <div style={{ fontSize: 14, fontWeight: 600, color: C.text }}>{user.email}</div>
-            <div style={{ fontSize: 12, color: C.muted }}>{user.email}</div>
+            <div style={{ fontSize: 14, fontWeight: 600, color: C.text }}>{user.username}</div>
           </div>
           <button onClick={onClose} style={{ marginLeft: 'auto', background: 'none', border: 'none', color: C.muted, fontSize: 18, cursor: 'pointer' }}>×</button>
         </div>
@@ -216,10 +209,9 @@ export default function UsersPage({ currentUser }) {
   function adaptUser(u) {
     return {
       id: u.id,
-      username: u.username || null,
-      email: u.email,
+      username: u.username,
       role: u.role,
-      avatar: u.email[0].toUpperCase(),
+      avatar: u.username?.[0]?.toUpperCase() ?? '?',
     }
   }
 
@@ -229,19 +221,30 @@ export default function UsersPage({ currentUser }) {
     setUsers(u => [...u, adaptUser(newUser)])
   }
 
-  function handleRoleSave(id, role) {
-    showNotice('Role update is not implemented on the backend (local display only).')
-    setUsers(u => u.map(usr => usr.id === id ? { ...usr, role } : usr))
+  async function handleRoleSave(id, role) {
+    try {
+      const res = await apiFetch(`/users/${id}/role`, {
+        method: 'PATCH',
+        body: JSON.stringify({ role }),
+      })
+      setUsers(u => u.map(usr => usr.id === id ? { ...usr, role: res.data.role } : usr))
+    } catch (err) {
+      showNotice(err.message)
+    }
   }
 
-  function handleRemove(id) {
-    if (!confirm('Remove this user? (Note: not implemented on backend — local display only)')) return
-    setUsers(u => u.filter(usr => usr.id !== id))
+  async function handleRemove(id) {
+    if (!confirm('Remove this user?')) return
+    try {
+      await apiFetch(`/users/${id}`, { method: 'DELETE' })
+      setUsers(u => u.filter(usr => usr.id !== id))
+    } catch (err) {
+      showNotice(err.message)
+    }
   }
 
   const filtered = users.filter(u =>
-    u.email.toLowerCase().includes(search.toLowerCase()) ||
-    (u.username && u.username.toLowerCase().includes(search.toLowerCase()))
+    u.username.toLowerCase().includes(search.toLowerCase())
   )
 
   return (
@@ -285,7 +288,7 @@ export default function UsersPage({ currentUser }) {
             ? <EmptyState message="No users found" />
             : filtered.map((user, i) => {
               const isHov = hov === user.id
-              const isMe = currentUser?.email === user.email
+              const isMe = currentUser?.id === user.id
               return (
                 <div
                   key={user.id}
@@ -295,17 +298,14 @@ export default function UsersPage({ currentUser }) {
                 >
                   <div style={{ width: '55%', display: 'flex', alignItems: 'center', gap: 10 }}>
                     <UserAvatar user={user} />
-                    <div>
-                      <div style={{ fontSize: 13, fontWeight: 500, color: C.text, display: 'flex', alignItems: 'center', gap: 6 }}>
-                        {user.username || <span style={{ color: C.dim, fontStyle: 'italic' }}>no username</span>}
-                        {isMe && <span style={{ fontSize: 9, color: C.blue, fontWeight: 600, background: `${C.blue}18`, border: `1px solid ${C.blue}44`, borderRadius: 3, padding: '1px 5px', textTransform: 'uppercase' }}>you</span>}
-                      </div>
-                      <div style={{ fontSize: 11, color: C.dim, marginTop: 1 }}>{user.email}</div>
+                    <div style={{ fontSize: 13, fontWeight: 500, color: C.text, display: 'flex', alignItems: 'center', gap: 6 }}>
+                      {user.username}
+                      {isMe && <span style={{ fontSize: 9, color: C.blue, fontWeight: 600, background: `${C.blue}18`, border: `1px solid ${C.blue}44`, borderRadius: 3, padding: '1px 5px', textTransform: 'uppercase' }}>you</span>}
                     </div>
                   </div>
                   <div style={{ width: '25%' }}><RoleBadge role={user.role} /></div>
                   <div style={{ width: '20%', display: 'flex', gap: 6, justifyContent: 'flex-end', opacity: isHov ? 1 : 0, transition: 'opacity 150ms' }}>
-                    <button onClick={() => setEditUser(user)} style={{ fontSize: 11, padding: '3px 8px', borderRadius: 4, border: `1px solid ${C.border}`, background: 'transparent', color: C.muted, cursor: 'pointer' }}>Edit</button>
+                    {!isMe && <button onClick={() => setEditUser(user)} style={{ fontSize: 11, padding: '3px 8px', borderRadius: 4, border: `1px solid ${C.border}`, background: 'transparent', color: C.muted, cursor: 'pointer' }}>Edit</button>}
                     {!isMe && (
                       <button onClick={() => handleRemove(user.id)} style={{ fontSize: 11, padding: '3px 8px', borderRadius: 4, border: `1px solid ${C.red}44`, background: 'transparent', color: C.red, cursor: 'pointer' }}>Remove</button>
                     )}
