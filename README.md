@@ -109,7 +109,7 @@ All endpoints require a `Bearer <token>` header when auth is enabled.
 
 ## Docker Hub
 
-Pre-built images are available at [`marocainperdu/yams`](https://hub.docker.com/r/marocainperdu/yams).
+Pre-built images are available at [`momokabil/yams`](https://hub.docker.com/r/momokabil/yams).
 
 Images are built automatically by GitHub Actions on every push to `main` and on every version tag (`v1.2.3`).
 
@@ -119,7 +119,7 @@ To build from source instead of pulling, replace `image:` with `build: .` in `co
 
 | Secret | Value |
 |---|---|
-| `DOCKERHUB_USERNAME` | `marocainperdu` |
+| `DOCKERHUB_USERNAME` | `momokabil` |
 | `DOCKERHUB_TOKEN` | Docker Hub access token (Account Settings > Security) |
 
 ### Release a new version
@@ -129,7 +129,7 @@ git tag v1.0.0
 git push origin v1.0.0
 ```
 
-The workflow builds `marocainperdu/yams:1.0.0`, `:1.0`, `:1`, and `:latest`.
+The workflow builds `momokabil/yams:1.0.0`, `:1.0`, `:1`, and `:latest`.
 
 ## Security
 
