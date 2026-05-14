@@ -21,6 +21,9 @@ router.delete('/:id',     requireServerPermission('control'), controller.remove)
 router.post('/:id/start', heavyOpLimiter, requireServerPermission('control'), controller.start);   // POST /servers/:id/start
 router.post('/:id/stop',  requireServerPermission('control'), controller.stop);    // POST /servers/:id/stop
 
+// Modpack install management
+router.post('/:id/cancel-install', requireServerPermission('control'), controller.cancelInstall); // POST /servers/:id/cancel-install
+
 // Metrics
 router.get('/:id/metrics', requireServerPermission('read'), metricsController.getOne); // GET /servers/:id/metrics
 

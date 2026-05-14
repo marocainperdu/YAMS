@@ -10,12 +10,20 @@ const serverService = require('../services/serverService');
 
 /**
  * POST /servers
- * Body: { name, port, ram?, engine?, version?, maxPlayers?, motd?, gamemode?, pvp?, onlineMode? }
+ * Manual: { name, port, ram?, engine?, version?, maxPlayers?, motd?, gamemode?, pvp?, onlineMode? }
+ * Modpack: { name, port, ram?, modpackPlatform, modpackProjectId, modpackVersionId,
+ *            modpackVersionFileUrl, modpackVersionName? }
  */
 async function create(req, res, next) {
   try {
-    const { name, port, ram, engine, version, maxPlayers, motd, gamemode, pvp, onlineMode } = req.body;
-    const server = await serverService.createServer({ name, port, ram, engine, version, maxPlayers, motd, gamemode, pvp, onlineMode });
+    const {
+      name, port, ram, engine, version, maxPlayers, motd, gamemode, pvp, onlineMode,
+      modpackPlatform, modpackProjectId, modpackVersionId, modpackVersionFileUrl, modpackVersionName,
+    } = req.body;
+    const server = await serverService.createServer({
+      name, port, ram, engine, version, maxPlayers, motd, gamemode, pvp, onlineMode,
+      modpackPlatform, modpackProjectId, modpackVersionId, modpackVersionFileUrl, modpackVersionName,
+    });
     res.status(201).json({ data: server });
   } catch (err) {
     next(err);
@@ -98,4 +106,16 @@ function reorder(req, res, next) {
   }
 }
 
-module.exports = { create, list, getOne, start, stop, remove, reorder };
+/**
+ * POST /servers/:id/cancel-install
+ */
+async function cancelInstall(req, res, next) {
+  try {
+    serverService.cancelInstallServer(req.params.id);
+    res.status(202).json({ message: 'Installation cancellation requested' });
+  } catch (err) {
+    next(err);
+  }
+}
+
+module.exports = { create, list, getOne, start, stop, remove, reorder, cancelInstall };

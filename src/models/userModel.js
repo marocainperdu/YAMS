@@ -17,11 +17,14 @@ function getStmts() {
       findByUsername: db.prepare(
         `SELECT * FROM users WHERE username = ?`
       ),
+      findByUsernameOrEmail: db.prepare(
+        `SELECT * FROM users WHERE username = ? OR (email IS NOT NULL AND email = ?)`
+      ),
       count: db.prepare(
         `SELECT COUNT(*) AS n FROM users`
       ),
       findAll: db.prepare(
-        `SELECT id, username, role, email, created_at FROM users ORDER BY created_at ASC`
+        `SELECT id, username, role, email, avatar, created_at FROM users ORDER BY created_at ASC`
       ),
       updateRole: db.prepare(
         `UPDATE users SET role = ? WHERE id = ?`
@@ -47,6 +50,9 @@ function getStmts() {
       updateTotpLastCode: db.prepare(
         `UPDATE users SET totp_last_code = ? WHERE id = ?`
       ),
+      updateAvatar: db.prepare(
+        `UPDATE users SET avatar = ? WHERE id = ?`
+      ),
     };
   }
   return stmts;
@@ -63,6 +69,10 @@ function findById(id) {
 
 function findByUsername(username) {
   return getStmts().findByUsername.get(username) ?? null;
+}
+
+function findByUsernameOrEmail(identifier) {
+  return getStmts().findByUsernameOrEmail.get(identifier, identifier) ?? null;
 }
 
 function count() {
@@ -106,8 +116,12 @@ function updateTotpLastCode(id, codeHash) {
   getStmts().updateTotpLastCode.run(codeHash, id);
 }
 
+function updateAvatar(id, dataUrl) {
+  getStmts().updateAvatar.run(dataUrl ?? null, id);
+}
+
 module.exports = {
-  create, findById, findByUsername, count, findAll,
+  create, findById, findByUsername, findByUsernameOrEmail, count, findAll,
   updateRole, remove, incrementTokenVersion,
-  updateUsername, updateEmail, updatePassword, updateTotp, updateTotpLastCode,
+  updateUsername, updateEmail, updatePassword, updateTotp, updateTotpLastCode, updateAvatar,
 };

@@ -22,6 +22,10 @@ function getStmts() {
         `INSERT INTO servers (id, name, path, port, ram)
          VALUES (?, ?, ?, ?, ?)`
       ),
+      insertModpack: db.prepare(
+        `INSERT INTO servers (id, name, path, port, ram, status, modpack_platform, modpack_id, modpack_version)
+         VALUES (?, ?, ?, ?, ?, 'installing', ?, ?, ?)`
+      ),
       findAll: db.prepare(
         `SELECT * FROM servers ORDER BY priority ASC, created_at ASC`
       ),
@@ -42,6 +46,11 @@ function getStmts() {
          SET status = ?, pid = ?, updated_at = datetime('now')
          WHERE id = ?`
       ),
+      updateInstallResult: db.prepare(
+        `UPDATE servers
+         SET status = ?, install_error = ?, updated_at = datetime('now')
+         WHERE id = ?`
+      ),
       remove: db.prepare(
         `DELETE FROM servers WHERE id = ?`
       ),
@@ -59,6 +68,30 @@ function create(server) {
   const s = getStmts();
   s.insert.run(server.id, server.name, server.path, server.port, server.ram);
   return findById(server.id);
+}
+
+/**
+ * Insert a server record for a modpack install (status='installing').
+ * @param {{ id, name, path, port, ram, modpackPlatform, modpackId, modpackVersion }} server
+ * @returns {object} The created server row
+ */
+function createFromModpack(server) {
+  const s = getStmts();
+  s.insertModpack.run(
+    server.id, server.name, server.path, server.port, server.ram,
+    server.modpackPlatform, server.modpackId, server.modpackVersion
+  );
+  return findById(server.id);
+}
+
+/**
+ * Update the install result after a modpack install completes or fails.
+ * @param {string} id
+ * @param {'stopped'|'install_failed'} status
+ * @param {string|null} installError  — error message, or null on success
+ */
+function updateInstallResult(id, status, installError) {
+  getStmts().updateInstallResult.run(status, installError ?? null, id);
 }
 
 /** @returns {object[]} All server rows, newest first */
@@ -117,4 +150,4 @@ function reorder(orderedIds) {
   })(orderedIds);
 }
 
-module.exports = { create, findAll, findById, findByPort, findByName, updateStatus, remove, reorder };
+module.exports = { create, createFromModpack, findAll, findById, findByPort, findByName, updateStatus, updateInstallResult, remove, reorder };

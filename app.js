@@ -22,6 +22,7 @@ require('./src/services/webhookService').init();   // subscribe to server lifecy
 const authRoutes    = require('./src/routes/authRoutes');
 const twoFARoutes   = require('./src/routes/twoFARoutes');
 const serverRoutes  = require('./src/routes/serverRoutes');
+const modpackRoutes = require('./src/routes/modpackRoutes');
 const fileRoutes    = require('./src/routes/fileRoutes');
 const backupRoutes  = require('./src/routes/backupRoutes');
 const worldRoutes   = require('./src/routes/worldRoutes');
@@ -39,7 +40,7 @@ const PORT = process.env.PORT || 3000;
 // Middleware
 // ---------------------------------------------------------------------------
 
-app.use(express.json({ limit: '16kb' }));
+app.use(express.json({ limit: '4mb' }));
 
 // Security headers
 app.use((_req, res, next) => {
@@ -64,6 +65,7 @@ app.get('/health', (_req, res) => res.json({ status: 'ok' }));
 app.use('/api/auth/2fa',                twoFARoutes);
 app.use('/api/auth',                    authRoutes);
 app.use('/api/servers',                 serverRoutes);
+app.use('/api/modpacks',                modpackRoutes);
 app.use('/api/servers/:id/files',       fileRoutes);
 app.use('/api/servers/:id/backups',     backupRoutes);
 app.use('/api/servers/:id/worlds',      worldRoutes);

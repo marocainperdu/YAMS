@@ -1,8 +1,8 @@
 services:
   yams:
-    image: momokabil/yams:latest
-    # Uncomment the line below (and remove or comment image:) to build from source instead.
-    # build: .
+    build: .
+    # To use the published image instead of building from source, swap the lines below:
+    # image: momokabil/yams:latest
     ports:
       # YAMS web UI — set YAMS_PORT in your .env to change the host port.
       - "${YAMS_PORT:-3001}:3000"
@@ -21,6 +21,8 @@ services:
       JWT_SECRET: ${JWT_SECRET}
       YAMS_ADMIN_USERNAME: ${YAMS_ADMIN_USERNAME}
       YAMS_ADMIN_PASSWORD: ${YAMS_ADMIN_PASSWORD}
+      # Optional — enables CurseForge modpack search (get a key at console.curseforge.com)
+      CURSEFORGE_API_KEY: ${CURSEFORGE_API_KEY:-}
     restart: unless-stopped
 
     healthcheck:

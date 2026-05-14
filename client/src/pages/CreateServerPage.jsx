@@ -1,13 +1,14 @@
 import React from 'react'
 import { apiFetch, C } from '../lib/yamsShared'
+import ModpackBrowser from '../components/ModpackBrowser'
 
 const ENGINE_OPTIONS = [
-  { id: 'vanilla', label: 'Vanilla', desc: 'Official Mojang server', logo: 'https://github.com/Mojang.png', color: '#3fb950' },
-  { id: 'paper', label: 'Paper', desc: 'High-performance fork', logo: 'https://github.com/PaperMC.png', color: '#388bfd' },
-  { id: 'fabric', label: 'Fabric', desc: 'Lightweight mod loader', logo: 'https://github.com/FabricMC.png', color: '#d29922' },
-  { id: 'purpur', label: 'Purpur', desc: 'Fork of Paper with extras', logo: 'https://github.com/PurpurMC.png', color: '#f778ba' },
-  { id: 'forge', label: 'Forge', desc: 'Popular mod platform', logo: 'https://github.com/MinecraftForge.png', color: '#f0883e', manualOnly: true },
-  { id: 'spigot', label: 'Spigot', desc: 'Bukkit-compatible plugins', logo: 'https://github.com/SpigotMC.png', color: '#bc8cff', manualOnly: true },
+  { id: 'vanilla',  label: 'Vanilla',  desc: 'Official Mojang server',       logo: 'https://github.com/Mojang.png',    color: '#3fb950' },
+  { id: 'paper',    label: 'Paper',    desc: 'High-performance fork',         logo: 'https://github.com/PaperMC.png',   color: '#388bfd' },
+  { id: 'fabric',   label: 'Fabric',   desc: 'Lightweight mod loader',        logo: 'https://github.com/FabricMC.png',  color: '#d29922' },
+  { id: 'purpur',   label: 'Purpur',   desc: 'Fork of Paper with extras',     logo: 'https://github.com/PurpurMC.png',  color: '#f778ba' },
+  { id: 'neoforge', label: 'NeoForge', desc: 'Modern Forge fork',             logo: 'https://github.com/neoforged.png', color: '#f0883e' },
+  { id: 'spigot',   label: 'Spigot',   desc: 'Bukkit-compatible plugins',     logo: 'https://github.com/SpigotMC.png',  color: '#bc8cff', manualOnly: true },
 ]
 
 const MC_VERSIONS = [
@@ -18,10 +19,145 @@ const MC_VERSIONS = [
 
 const GAMEMODES = ['survival', 'creative', 'adventure', 'spectator']
 
+// ── Shared settings fields ────────────────────────────────────────────────────
+
+const settingsInp = {
+  width: '100%', background: C.surface2, border: `1px solid ${C.border}`,
+  borderRadius: 7, padding: '9px 13px', fontSize: 14, color: C.text,
+  outline: 'none', boxSizing: 'border-box',
+}
+function SettingsLabel({ children }) {
+  return <label style={{ fontSize: 12, fontWeight: 500, color: C.muted, display: 'block', marginBottom: 6 }}>{children}</label>
+}
+function SettingsRow({ children, cols = 'repeat(2, 1fr)' }) {
+  return <div style={{ display: 'grid', gridTemplateColumns: cols, gap: 16 }}>{children}</div>
+}
+function ToggleField({ label, value, onChange }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: C.surface2, border: `1px solid ${C.border}`, borderRadius: 8, padding: '12px 14px' }}>
+      <span style={{ fontSize: 13, color: C.text }}>{label}</span>
+      <button type="button" onClick={() => onChange(!value)} style={{
+        width: 40, height: 22, borderRadius: 11, border: 'none', cursor: 'pointer',
+        background: value ? C.green : C.border, position: 'relative', transition: 'background 200ms',
+      }}>
+        <div style={{
+          position: 'absolute', top: 3, left: value ? 21 : 3,
+          width: 16, height: 16, borderRadius: '50%', background: '#fff',
+          transition: 'left 200ms',
+        }} />
+      </button>
+    </div>
+  )
+}
+
+// ── WS URL helper (same as ConsolePage) ──────────────────────────────────────
+function wsBaseUrl() {
+  if (import.meta.env.VITE_WS_URL) return import.meta.env.VITE_WS_URL
+  const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+  return `${proto}//${window.location.host}/ws`
+}
+
+// ── Wizard stepper ────────────────────────────────────────────────────────────
+function Stepper({ steps, step }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', marginBottom: 36, flexShrink: 0 }}>
+      {steps.map((label, i) => (
+        <React.Fragment key={i}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div style={{
+              width: 28, height: 28, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontSize: 12, fontWeight: 700,
+              background: i < step ? C.green : i === step ? C.blue : C.surface2,
+              color: i < step ? '#0d1117' : i === step ? '#fff' : C.dim,
+              border: `2px solid ${i < step ? C.green : i === step ? C.blue : C.border}`,
+              transition: 'all 200ms',
+            }}>{i < step ? '✓' : i + 1}</div>
+            <span style={{ fontSize: 12, fontWeight: i === step ? 600 : 400, color: i === step ? C.text : C.muted }}>{label}</span>
+          </div>
+          {i < steps.length - 1 && (
+            <div style={{ flex: 1, height: 2, margin: '0 10px', background: i < step ? C.green : C.surface2, transition: 'background 200ms' }} />
+          )}
+        </React.Fragment>
+      ))}
+    </div>
+  )
+}
+
+// ── Main component ────────────────────────────────────────────────────────────
+
 export default function CreateServerPage({ onCreated, onCancel }) {
-  const [step, setStep] = React.useState(0)
-  const [engine, setEngine] = React.useState('')
-  const [version, setVersion] = React.useState('')
+  const [mode, setMode] = React.useState(null) // null = mode picker | 'manual' | 'modpack'
+  const [platforms, setPlatforms] = React.useState(['modrinth'])
+
+  // Fetch available platforms on mount
+  React.useEffect(() => {
+    apiFetch('/modpacks/platforms')
+      .then(res => setPlatforms(res.data ?? ['modrinth']))
+      .catch(() => {})
+  }, [])
+
+  if (!mode) {
+    return <ModePicker onPick={setMode} onCancel={onCancel} />
+  }
+
+  if (mode === 'manual') {
+    return <ManualWizard onCreated={onCreated} onCancel={() => setMode(null)} />
+  }
+
+  return <ModpackWizard onCreated={onCreated} onCancel={() => setMode(null)} platforms={platforms} />
+}
+
+// ── Mode picker ───────────────────────────────────────────────────────────────
+
+function ModePicker({ onPick, onCancel }) {
+  return (
+    <div style={{ maxWidth: 520, margin: '0 auto', padding: '48px 24px', display: 'flex', flexDirection: 'column', height: 'calc(100vh - 48px)', boxSizing: 'border-box' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 40, flexShrink: 0 }}>
+        <h1 style={{ fontSize: 20, fontWeight: 700, color: C.text, margin: 0 }}>New Server</h1>
+        <button onClick={onCancel} style={{ background: 'none', border: 'none', color: C.muted, fontSize: 20, cursor: 'pointer', lineHeight: 1 }}>✕</button>
+      </div>
+
+      <div style={{ fontSize: 14, color: C.muted, marginBottom: 24 }}>How do you want to create this server?</div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+        <button onClick={() => onPick('manual')} style={{
+          display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 10,
+          padding: '22px 20px', borderRadius: 12, cursor: 'pointer', textAlign: 'left',
+          background: C.surface2, border: `2px solid ${C.border}`,
+          transition: 'border-color 150ms',
+        }}
+          onMouseEnter={e => e.currentTarget.style.borderColor = C.blue}
+          onMouseLeave={e => e.currentTarget.style.borderColor = C.border}
+        >
+          <div style={{ fontSize: 24 }}>⚙️</div>
+          <div style={{ fontSize: 14, fontWeight: 700, color: C.text }}>Manual Setup</div>
+          <div style={{ fontSize: 12, color: C.muted, lineHeight: 1.5 }}>Pick an engine (Vanilla, Paper, Fabric…) and Minecraft version.</div>
+        </button>
+
+        <button onClick={() => onPick('modpack')} style={{
+          display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 10,
+          padding: '22px 20px', borderRadius: 12, cursor: 'pointer', textAlign: 'left',
+          background: C.surface2, border: `2px solid ${C.border}`,
+          transition: 'border-color 150ms',
+        }}
+          onMouseEnter={e => e.currentTarget.style.borderColor = C.purple}
+          onMouseLeave={e => e.currentTarget.style.borderColor = C.border}
+        >
+          <div style={{ fontSize: 24 }}>📦</div>
+          <div style={{ fontSize: 14, fontWeight: 700, color: C.text }}>From Modpack</div>
+          <div style={{ fontSize: 12, color: C.muted, lineHeight: 1.5 }}>Search Modrinth (or CurseForge) and import a full modpack automatically.</div>
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// ── Manual wizard (original flow, unchanged) ──────────────────────────────────
+
+function ManualWizard({ onCreated, onCancel }) {
+  const [step, setStep]         = React.useState(0)
+  const [engine, setEngine]     = React.useState('')
+  const [version, setVersion]   = React.useState('')
   const [settings, setSettings] = React.useState({
     name: '', memory: '', port: '25565',
     maxPlayers: '20', gamemode: 'survival',
@@ -30,14 +166,14 @@ export default function CreateServerPage({ onCreated, onCancel }) {
   })
   const [creating, setCreating] = React.useState(false)
   const [progress, setProgress] = React.useState(0)
-  const [error, setError] = React.useState(null)
+  const [error, setError]       = React.useState(null)
 
   const STEPS = ['Engine', 'Version', 'Settings', 'Review']
 
   function canAdvance() {
     if (step === 0) return !!engine
     if (step === 1) return !!version
-    if (step === 2) return settings.name.trim().length >= 3 && /^[A-Za-z][A-Za-z0-9-]{2,31}$/.test(settings.name.trim())
+    if (step === 2) return /^[A-Za-z][A-Za-z0-9-]{2,31}$/.test(settings.name.trim())
     return true
   }
 
@@ -49,13 +185,8 @@ export default function CreateServerPage({ onCreated, onCancel }) {
     setProgress(0)
     setError(null)
 
-    // Animate through the first two steps quickly, then hold at "Downloading…"
-    // while the actual network request (which includes the JAR download) runs.
     const interval = setInterval(() => {
-      setProgress(p => {
-        if (p >= 2) { clearInterval(interval); return 2 }
-        return p + 1
-      })
+      setProgress(p => { if (p >= 2) { clearInterval(interval); return 2 } return p + 1 })
     }, 900)
 
     try {
@@ -65,8 +196,7 @@ export default function CreateServerPage({ onCreated, onCancel }) {
           name: settings.name.trim(),
           port: parseInt(settings.port, 10),
           ram: settings.memory ? `${settings.memory}M` : '1024M',
-          engine: engine,
-          version: version,
+          engine, version,
           maxPlayers: parseInt(settings.maxPlayers, 10),
           motd: settings.motd,
           gamemode: settings.gamemode,
@@ -89,37 +219,17 @@ export default function CreateServerPage({ onCreated, onCancel }) {
   return (
     <div style={{ maxWidth: 720, margin: '0 auto', padding: '32px 24px', display: 'flex', flexDirection: 'column', height: 'calc(100vh - 48px)', boxSizing: 'border-box' }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 32, flexShrink: 0 }}>
-        <h1 style={{ fontSize: 20, fontWeight: 700, color: C.text, margin: 0 }}>New Server</h1>
+        <h1 style={{ fontSize: 20, fontWeight: 700, color: C.text, margin: 0 }}>New Server — Manual</h1>
         <button onClick={onCancel} style={{ background: 'none', border: 'none', color: C.muted, fontSize: 20, cursor: 'pointer', lineHeight: 1 }}>✕</button>
       </div>
 
-      <div style={{ display: 'flex', alignItems: 'center', marginBottom: 36, flexShrink: 0 }}>
-        {STEPS.map((label, i) => (
-          <React.Fragment key={i}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <div style={{
-                width: 28, height: 28, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                fontSize: 12, fontWeight: 700,
-                background: i < step ? C.green : i === step ? C.blue : C.surface2,
-                color: i < step ? '#0d1117' : i === step ? '#fff' : C.dim,
-                border: `2px solid ${i < step ? C.green : i === step ? C.blue : C.border}`,
-                transition: 'all 200ms',
-              }}>{i < step ? '✓' : i + 1}</div>
-              <span style={{ fontSize: 12, fontWeight: i === step ? 600 : 400, color: i === step ? C.text : C.muted }}>{label}</span>
-            </div>
-            {i < STEPS.length - 1 && (
-              <div style={{ flex: 1, height: 2, margin: '0 10px', background: i < step ? C.green : C.surface2, transition: 'background 200ms' }} />
-            )}
-          </React.Fragment>
-        ))}
-      </div>
+      <Stepper steps={STEPS} step={step} />
 
       <div style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
         {step === 0 && <StepEngine engine={engine} setEngine={setEngine} />}
         {step === 1 && <StepVersion version={version} setVersion={setVersion} />}
         {step === 2 && <StepSettings settings={settings} setSettings={setSettings} />}
         {step === 3 && <StepReview engine={engine} version={version} settings={settings} />}
-
         {error && (
           <div style={{ marginTop: 20, background: `${C.red}12`, border: `1px solid ${C.red}44`, borderRadius: 6, padding: '10px 14px', fontSize: 12, color: C.red }}>{error}</div>
         )}
@@ -129,26 +239,495 @@ export default function CreateServerPage({ onCreated, onCancel }) {
         <button onClick={step === 0 ? onCancel : handleBack} style={{
           padding: '9px 22px', borderRadius: 7, border: `1px solid ${C.border}`,
           background: 'none', color: C.muted, fontSize: 13, cursor: 'pointer',
-        }}>{step === 0 ? 'Cancel' : '← Back'}</button>
+        }}>{step === 0 ? '← Back' : '← Back'}</button>
 
         {step < 3
           ? <button onClick={handleNext} disabled={!canAdvance()} style={{
-            padding: '9px 28px', borderRadius: 7, border: 'none',
-            background: canAdvance() ? C.blue : C.surface2,
-            color: canAdvance() ? '#fff' : C.dim,
-            fontSize: 13, fontWeight: 600, cursor: canAdvance() ? 'pointer' : 'default',
-            transition: 'background 150ms',
-          }}>Next →</button>
+              padding: '9px 28px', borderRadius: 7, border: 'none',
+              background: canAdvance() ? C.blue : C.surface2,
+              color: canAdvance() ? '#fff' : C.dim,
+              fontSize: 13, fontWeight: 600, cursor: canAdvance() ? 'pointer' : 'default',
+              transition: 'background 150ms',
+            }}>Next →</button>
           : <button onClick={handleCreate} style={{
-            padding: '9px 28px', borderRadius: 7, border: 'none',
-            background: C.green, color: '#0d1117',
-            fontSize: 13, fontWeight: 700, cursor: 'pointer',
-          }}>Create server</button>
+              padding: '9px 28px', borderRadius: 7, border: 'none',
+              background: C.green, color: '#0d1117',
+              fontSize: 13, fontWeight: 700, cursor: 'pointer',
+            }}>Create server</button>
         }
       </div>
     </div>
   )
 }
+
+// ── Modpack wizard ────────────────────────────────────────────────────────────
+
+function ModpackWizard({ onCreated, onCancel, platforms }) {
+  const [step, setStep]                   = React.useState(0)
+  const [selectedPack, setSelectedPack]   = React.useState(null)
+  const [selectedVersion, setSelectedVersion] = React.useState(null)
+  const [settings, setSettings]           = React.useState({
+    name: '', memory: '', port: '25565',
+    motd: 'A YAMS Minecraft Server',
+    onlineMode: true, pvp: true,
+  })
+  const [error, setError]   = React.useState(null)
+  const [serverId, setServerId] = React.useState(null)
+  const [installing, setInstalling] = React.useState(false)
+
+  const STEPS = ['Search', 'Version', 'Settings', 'Review']
+
+  function canAdvance() {
+    if (step === 0) return !!selectedPack
+    if (step === 1) return !!selectedVersion?.fileUrl
+    if (step === 2) return /^[A-Za-z][A-Za-z0-9-]{2,31}$/.test(settings.name.trim())
+    return true
+  }
+
+  function handleNext() { if (canAdvance()) { setStep(s => s + 1); setError(null) } }
+  function handleBack() { setStep(s => s - 1); setError(null) }
+
+  async function handleCreate() {
+    setError(null)
+    try {
+      const res = await apiFetch('/servers', {
+        method: 'POST',
+        body: JSON.stringify({
+          name:                 settings.name.trim(),
+          port:                 parseInt(settings.port, 10),
+          ram:                  settings.memory ? `${settings.memory}M` : '1024M',
+          motd:                 settings.motd,
+          pvp:                  settings.pvp,
+          onlineMode:           settings.onlineMode,
+          modpackPlatform:      selectedPack.platform,
+          modpackProjectId:     selectedPack.projectId,
+          modpackVersionId:     selectedVersion.id,
+          modpackVersionFileUrl: selectedVersion.fileUrl,
+          modpackVersionName:   selectedVersion.name,
+        }),
+      })
+      setServerId(res.data.id)
+      setInstalling(true)
+    } catch (err) {
+      setError(err.message || 'Failed to start installation.')
+    }
+  }
+
+  if (installing && serverId) {
+    return <ModpackInstallProgress serverId={serverId} serverName={settings.name} packName={selectedPack?.title} onDone={onCreated} />
+  }
+
+  return (
+    <div style={{ maxWidth: 720, margin: '0 auto', padding: '32px 24px', display: 'flex', flexDirection: 'column', height: 'calc(100vh - 48px)', boxSizing: 'border-box' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 32, flexShrink: 0 }}>
+        <h1 style={{ fontSize: 20, fontWeight: 700, color: C.text, margin: 0 }}>New Server — From Modpack</h1>
+        <button onClick={onCancel} style={{ background: 'none', border: 'none', color: C.muted, fontSize: 20, cursor: 'pointer', lineHeight: 1 }}>✕</button>
+      </div>
+
+      <Stepper steps={STEPS} step={step} />
+
+      <div style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
+        {step === 0 && (
+          <ModpackBrowser
+            selectedPack={selectedPack}
+            onSelectPack={pack => { setSelectedPack(pack); setSelectedVersion(null) }}
+            platforms={platforms}
+          />
+        )}
+        {step === 1 && (
+          <ModpackVersionStep
+            selectedPack={selectedPack}
+            selectedVersion={selectedVersion}
+            onSelectVersion={setSelectedVersion}
+          />
+        )}
+        {step === 2 && <ModpackSettings settings={settings} setSettings={setSettings} />}
+        {step === 3 && <ModpackReview pack={selectedPack} version={selectedVersion} settings={settings} />}
+        {error && (
+          <div style={{ marginTop: 20, background: `${C.red}12`, border: `1px solid ${C.red}44`, borderRadius: 6, padding: '10px 14px', fontSize: 12, color: C.red }}>{error}</div>
+        )}
+      </div>
+
+      <div style={{ display: 'flex', justifyContent: 'space-between', paddingTop: 20, marginTop: 16, borderTop: `1px solid ${C.border}`, flexShrink: 0 }}>
+        <button onClick={step === 0 ? onCancel : handleBack} style={{
+          padding: '9px 22px', borderRadius: 7, border: `1px solid ${C.border}`,
+          background: 'none', color: C.muted, fontSize: 13, cursor: 'pointer',
+        }}>← Back</button>
+
+        {step < 3
+          ? <button onClick={handleNext} disabled={!canAdvance()} style={{
+              padding: '9px 28px', borderRadius: 7, border: 'none',
+              background: canAdvance() ? C.blue : C.surface2,
+              color: canAdvance() ? '#fff' : C.dim,
+              fontSize: 13, fontWeight: 600, cursor: canAdvance() ? 'pointer' : 'default',
+            }}>Next →</button>
+          : <button onClick={handleCreate} style={{
+              padding: '9px 28px', borderRadius: 7, border: 'none',
+              background: C.purple, color: '#fff',
+              fontSize: 13, fontWeight: 700, cursor: 'pointer',
+            }}>Install Modpack</button>
+        }
+      </div>
+    </div>
+  )
+}
+
+// ── Modpack version step ──────────────────────────────────────────────────────
+
+const LOADER_COLORS = { fabric: C.amber, forge: '#f0883e', neoforge: '#f0883e', quilt: '#bc8cff' }
+function loaderColor(l) { return LOADER_COLORS[l?.toLowerCase()] ?? C.muted }
+
+function normaliseVersion(v, platform) {
+  if (platform === 'modrinth') {
+    const file = v.files?.[0]
+    return { id: v.id, name: v.name || v.version_number, mcVersions: v.game_versions ?? [], loaders: v.loaders ?? [], fileUrl: file?.url, fileName: file?.filename }
+  }
+  const loaderStr = v.sortableGameVersions?.find(g => g.gameVersionTypeId === 68441)?.gameVersionName ?? ''
+  return {
+    id: String(v.id), name: v.displayName || v.fileName,
+    mcVersions: [v.gameVersions?.find(g => !g.includes('-'))].filter(Boolean),
+    loaders: loaderStr ? [loaderStr.split('-')[0].toLowerCase()] : [],
+    fileUrl: v.downloadUrl, fileName: v.fileName,
+  }
+}
+
+function ModpackVersionStep({ selectedPack, selectedVersion, onSelectVersion }) {
+  const [versions, setVersions] = React.useState([])
+  const [loading, setLoading]   = React.useState(true)
+  const [error, setError]       = React.useState(null)
+
+  React.useEffect(() => {
+    if (!selectedPack) return
+    let cancelled = false
+    setLoading(true)
+    setError(null)
+    setVersions([])
+
+    apiFetch(`/modpacks/${selectedPack.platform}/${selectedPack.projectId}/versions`)
+      .then(res => {
+        if (cancelled) return
+        const normed = (res.data ?? []).map(v => normaliseVersion(v, selectedPack.platform))
+        setVersions(normed)
+        setLoading(false)
+        if (normed.length > 0 && !selectedVersion) onSelectVersion(normed[0])
+      })
+      .catch(err => {
+        if (!cancelled) { setLoading(false); setError(err.message ?? 'Failed to load versions') }
+      })
+
+    return () => { cancelled = true }
+  }, [selectedPack?.projectId])
+
+  if (loading) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'center', padding: '48px 0', color: C.muted, fontSize: 13 }}>
+        Loading versions for {selectedPack?.title}…
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div style={{ padding: '12px 14px', background: `${C.red}12`, border: `1px solid ${C.red}44`, borderRadius: 8, color: C.red, fontSize: 13 }}>
+        {error}
+      </div>
+    )
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div style={{ fontSize: 13, color: C.muted, marginBottom: 8 }}>
+        Select a version of <strong style={{ color: C.text }}>{selectedPack?.title}</strong> to install.
+      </div>
+
+      {versions.map(v => {
+        const isSelected = selectedVersion?.id === v.id
+        const restricted = !v.fileUrl
+        return (
+          <button key={v.id} onClick={() => !restricted && onSelectVersion(v)} style={{
+            display: 'flex', alignItems: 'center', gap: 12, padding: '11px 14px',
+            borderRadius: 8, textAlign: 'left',
+            cursor: restricted ? 'not-allowed' : 'pointer',
+            opacity: restricted ? 0.5 : 1,
+            background: isSelected ? `${C.green}18` : C.surface2,
+            border: `2px solid ${isSelected ? C.green : C.border}`,
+            boxShadow: isSelected ? `inset 3px 0 0 ${C.green}` : 'none',
+            transition: 'all 150ms',
+          }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: isSelected ? C.green : C.text }}>{v.name}</div>
+              {restricted && <div style={{ fontSize: 10, color: C.amber, marginTop: 2 }}>Distribution restricted — cannot auto-install</div>}
+            </div>
+            <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
+              {v.mcVersions.slice(0, 1).map(mc => (
+                <span key={mc} style={{ fontSize: 10, padding: '2px 7px', borderRadius: 4, background: `${C.blue}18`, color: C.blue, border: `1px solid ${C.blue}44`, fontWeight: 500 }}>MC {mc}</span>
+              ))}
+              {v.loaders.slice(0, 1).map(l => (
+                <span key={l} style={{ fontSize: 10, padding: '2px 7px', borderRadius: 4, background: `${loaderColor(l)}18`, color: loaderColor(l), border: `1px solid ${loaderColor(l)}44`, fontWeight: 500 }}>
+                  {l.charAt(0).toUpperCase() + l.slice(1)}
+                </span>
+              ))}
+            </div>
+            {isSelected && (
+              <div style={{ flexShrink: 0, width: 20, height: 20, borderRadius: '50%', background: C.green, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, color: '#0d1117', fontWeight: 700 }}>✓</div>
+            )}
+          </button>
+        )
+      })}
+
+      {versions.length === 0 && (
+        <div style={{ color: C.muted, fontSize: 13, textAlign: 'center', padding: 32 }}>No versions available.</div>
+      )}
+    </div>
+  )
+}
+
+// ── Modpack settings step (name/port/RAM only) ────────────────────────────────
+
+function ModpackSettings({ settings, setSettings }) {
+  function set(key, val) { setSettings(s => ({ ...s, [key]: val })) }
+  const isValidName = /^[A-Za-z][A-Za-z0-9-]{2,31}$/.test(settings.name.trim())
+  const nameError = settings.name.length > 0 && !isValidName
+    ? 'Name must start with a letter, use only letters, numbers, hyphens (3–32 chars).' : null
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+      <div style={{ fontSize: 13, color: C.muted, padding: '10px 14px', background: `${C.blue}0d`, border: `1px solid ${C.blue}33`, borderRadius: 6 }}>
+        The mod loader and Minecraft version will be set automatically from the modpack.
+      </div>
+
+      <div>
+        <SettingsLabel>Server name *</SettingsLabel>
+        <input value={settings.name} onChange={e => set('name', e.target.value)}
+          style={{ ...settingsInp, borderColor: nameError ? C.red : C.border }}
+          onFocus={e => { e.target.style.borderColor = nameError ? C.red : C.blue }}
+          onBlur={e => { e.target.style.borderColor = nameError ? C.red : C.border }}
+          placeholder="my-modpack-server" />
+        {nameError && <div style={{ fontSize: 11, color: C.red, marginTop: 4 }}>{nameError}</div>}
+      </div>
+
+      <SettingsRow>
+        <div>
+          <SettingsLabel>Memory (MB)</SettingsLabel>
+          <input type="number" min="512" value={settings.memory} onChange={e => set('memory', e.target.value)}
+            placeholder="e.g. 4096" style={settingsInp}
+            onFocus={e => { e.target.style.borderColor = C.blue }}
+            onBlur={e => { e.target.style.borderColor = C.border }} />
+        </div>
+        <div>
+          <SettingsLabel>Port</SettingsLabel>
+          <input type="number" min="1024" max="65535" value={settings.port} onChange={e => set('port', e.target.value)}
+            style={settingsInp}
+            onFocus={e => { e.target.style.borderColor = C.blue }}
+            onBlur={e => { e.target.style.borderColor = C.border }} />
+        </div>
+      </SettingsRow>
+
+      <div>
+        <SettingsLabel>MOTD</SettingsLabel>
+        <input value={settings.motd} onChange={e => set('motd', e.target.value)} style={settingsInp}
+          onFocus={e => { e.target.style.borderColor = C.blue }}
+          onBlur={e => { e.target.style.borderColor = C.border }}
+          placeholder="A Minecraft Server" />
+      </div>
+
+      <SettingsRow>
+        <ToggleField label="Online mode (auth)" value={settings.onlineMode} onChange={v => set('onlineMode', v)} />
+        <ToggleField label="PvP enabled" value={settings.pvp} onChange={v => set('pvp', v)} />
+      </SettingsRow>
+    </div>
+  )
+}
+
+// ── Modpack review step ───────────────────────────────────────────────────────
+
+function ModpackReview({ pack, version, settings }) {
+  const rows = [
+    ['Modpack',  pack?.title ?? '—'],
+    ['Version',  version?.name ?? '—'],
+    ['Platform', pack?.platform ?? '—'],
+    ['Name',     settings.name],
+    ['Memory',   settings.memory ? `${settings.memory} MB` : '1024 MB'],
+    ['Port',     settings.port],
+    ['MOTD',     settings.motd],
+    ['Online mode', settings.onlineMode ? 'Yes' : 'No'],
+    ['PvP',      settings.pvp ? 'Enabled' : 'Disabled'],
+  ]
+
+  return (
+    <div>
+      <div style={{ fontSize: 14, color: C.muted, marginBottom: 20 }}>Review before installing. The modpack will download in the background.</div>
+      <div style={{ background: C.surface2, border: `1px solid ${C.border}`, borderRadius: 10, overflow: 'hidden' }}>
+        {rows.map(([label, value], i) => (
+          <div key={label} style={{
+            display: 'flex', padding: '11px 18px',
+            background: i % 2 === 0 ? 'transparent' : `${C.bg}66`,
+            borderBottom: i < rows.length - 1 ? `1px solid ${C.border}` : 'none',
+          }}>
+            <span style={{ width: 140, flexShrink: 0, fontSize: 12, color: C.muted, fontWeight: 500 }}>{label}</span>
+            <span style={{ fontSize: 13, color: C.text, textTransform: label === 'Platform' ? 'capitalize' : 'none' }}>{value}</span>
+          </div>
+        ))}
+      </div>
+      <div style={{ marginTop: 16, padding: '12px 16px', background: `${C.purple}10`, border: `1px solid ${C.purple}44`, borderRadius: 8, fontSize: 12, color: C.purple, lineHeight: 1.5 }}>
+        Mods will be downloaded from {pack?.platform === 'modrinth' ? 'Modrinth' : 'CurseForge'}. Install progress is shown in real time.
+      </div>
+    </div>
+  )
+}
+
+// ── Real-time modpack install progress ────────────────────────────────────────
+
+function ModpackInstallProgress({ serverId, serverName, packName, onDone }) {
+  const [step, setStep]       = React.useState('connecting')
+  const [message, setMessage] = React.useState('Connecting…')
+  const [current, setCurrent] = React.useState(0)
+  const [total, setTotal]     = React.useState(0)
+  const [error, setError]     = React.useState(null)
+  const [done, setDone]       = React.useState(false)
+  const [skipped, setSkipped] = React.useState([])
+  const wsRef = React.useRef(null)
+
+  React.useEffect(() => {
+    const token = sessionStorage.getItem('yams_token') ?? ''
+    const url = `${wsBaseUrl()}${token ? `?token=${token}` : ''}`
+    const ws = new WebSocket(url)
+    wsRef.current = ws
+
+    ws.onopen = () => {
+      ws.send(JSON.stringify({ action: 'subscribe', serverId }))
+    }
+
+    ws.onmessage = e => {
+      let msg
+      try { msg = JSON.parse(e.data) } catch { return }
+
+      if (msg.type === 'status' && msg.data === 'installing') {
+        setStep('installing')
+        setMessage('Preparing installation…')
+      }
+
+      if (msg.type === 'install_progress') {
+        setStep(msg.step)
+        if (msg.step === 'downloading_mods') {
+          setCurrent(msg.current ?? 0)
+          setTotal(msg.total ?? 0)
+          setMessage(`Downloading mods (${msg.current}/${msg.total})${msg.name ? ` — ${msg.name}` : ''}`)
+        } else {
+          setMessage(msg.message ?? msg.step)
+        }
+      }
+
+      if (msg.type === 'install_complete') {
+        setStep('complete')
+        setMessage('Installation complete!')
+        setDone(true)
+        setSkipped(msg.skippedMods ?? [])
+        ws.close()
+      }
+
+      if (msg.type === 'install_error') {
+        setError(msg.message)
+        ws.close()
+      }
+
+      if (msg.type === 'install_cancelled') {
+        setError('Installation was cancelled.')
+        ws.close()
+      }
+    }
+
+    ws.onclose = () => {}
+    ws.onerror = () => setError('WebSocket connection failed.')
+
+    return () => ws.close()
+  }, [serverId])
+
+  async function handleCancel() {
+    wsRef.current?.close()
+    try { await apiFetch(`/servers/${serverId}/cancel-install`, { method: 'POST' }) } catch {}
+    onDone && onDone()
+  }
+
+  const pct = total > 0 ? Math.round((current / total) * 100) : (done ? 100 : 0)
+
+  const stepLabels = {
+    connecting:         'Connecting…',
+    installing:         'Preparing…',
+    downloading_pack:   'Downloading modpack archive…',
+    extracting:         'Extracting…',
+    installing_loader:  'Installing mod loader…',
+    resolving_mods:     'Resolving mod download URLs…',
+    downloading_mods:   `Downloading mods…`,
+    copying_overrides:  'Copying overrides…',
+    complete:           'Done!',
+  }
+
+  return (
+    <div style={{ maxWidth: 520, margin: '0 auto', padding: '60px 24px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 28 }}>
+      <div style={{ fontSize: 15, fontWeight: 700, color: C.text, textAlign: 'center' }}>
+        {error ? 'Installation Failed' : done ? 'Installed!' : `Installing ${packName ?? 'modpack'}…`}
+      </div>
+
+      {!error && (
+        <>
+          <div style={{ width: '100%', background: C.surface2, borderRadius: 4, height: 6, overflow: 'hidden' }}>
+            <div style={{
+              height: '100%', borderRadius: 4, background: done ? C.green : C.blue,
+              width: `${pct}%`,
+              transition: 'width 400ms ease',
+            }} />
+          </div>
+          <div style={{ fontSize: 12, color: C.muted, textAlign: 'center', minHeight: 18 }}>{message}</div>
+        </>
+      )}
+
+      {error && (
+        <div style={{ width: '100%', background: `${C.red}12`, border: `1px solid ${C.red}44`, borderRadius: 8, padding: '14px 16px', fontSize: 12, color: C.red, textAlign: 'center' }}>
+          {error}
+        </div>
+      )}
+
+      {skipped.length > 0 && (
+        <div style={{ width: '100%', background: `${C.amber}12`, border: `1px solid ${C.amber}44`, borderRadius: 8, padding: '14px 16px', fontSize: 12 }}>
+          <div style={{ fontWeight: 600, color: C.amber, marginBottom: 6 }}>
+            {skipped.length} mod{skipped.length > 1 ? 's' : ''} could not be downloaded automatically
+          </div>
+          <div style={{ color: C.muted, lineHeight: 1.7, marginBottom: 8 }}>
+            These mods are distribution-restricted — the authors have opted out of third-party downloads.
+            You'll need to install them manually via the file manager.
+          </div>
+          <ul style={{ margin: 0, padding: '0 0 0 16px', color: C.muted }}>
+            {skipped.map((name, i) => <li key={i} style={{ fontFamily: 'monospace', fontSize: 11 }}>{name}</li>)}
+          </ul>
+        </div>
+      )}
+
+      <div style={{ display: 'flex', gap: 12, marginTop: 8 }}>
+        {done && (
+          <button onClick={() => onDone && onDone()} style={{
+            padding: '9px 28px', borderRadius: 7, border: 'none',
+            background: C.green, color: '#0d1117', fontSize: 13, fontWeight: 700, cursor: 'pointer',
+          }}>Go to server →</button>
+        )}
+        {error && (
+          <button onClick={() => onDone && onDone()} style={{
+            padding: '9px 22px', borderRadius: 7, border: `1px solid ${C.border}`,
+            background: 'none', color: C.muted, fontSize: 13, cursor: 'pointer',
+          }}>Back to dashboard</button>
+        )}
+        {!done && !error && (
+          <button onClick={handleCancel} style={{
+            padding: '9px 20px', borderRadius: 7, border: `1px solid ${C.red}44`,
+            background: `${C.red}0d`, color: C.red, fontSize: 12, cursor: 'pointer',
+          }}>Cancel installation</button>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ── Manual wizard steps (unchanged from original) ─────────────────────────────
 
 function StepEngine({ engine, setEngine }) {
   return (
@@ -162,7 +741,6 @@ function StepEngine({ engine, setEngine }) {
             background: engine === opt.id ? `${opt.color}18` : C.surface2,
             border: `2px solid ${engine === opt.id ? opt.color : C.border}`,
             transition: 'border-color 150ms, background 150ms', textAlign: 'left',
-            position: 'relative',
           }}>
             <img src={opt.logo} alt={opt.label} style={{ width: 36, height: 36, borderRadius: 6, objectFit: 'contain' }} />
             <div style={{ fontSize: 14, fontWeight: 600, color: C.text }}>{opt.label}</div>
@@ -201,102 +779,65 @@ function StepVersion({ version, setVersion }) {
   )
 }
 
-const settingsInp = {
-  width: '100%', background: C.surface2, border: `1px solid ${C.border}`,
-  borderRadius: 7, padding: '9px 13px', fontSize: 14, color: C.text,
-  outline: 'none', boxSizing: 'border-box',
-}
-function SettingsLabel({ children }) {
-  return <label style={{ fontSize: 12, fontWeight: 500, color: C.muted, display: 'block', marginBottom: 6 }}>{children}</label>
-}
-function SettingsRow({ children, cols = 'repeat(2, 1fr)' }) {
-  return <div style={{ display: 'grid', gridTemplateColumns: cols, gap: 16 }}>{children}</div>
-}
-
 function StepSettings({ settings, setSettings }) {
   function set(key, val) { setSettings(s => ({ ...s, [key]: val })) }
-
   const isValidName = /^[A-Za-z][A-Za-z0-9-]{2,31}$/.test(settings.name.trim())
   const nameError = settings.name.length > 0 && !isValidName
-    ? 'Name must start with a letter, use only letters, numbers, hyphens (3–32 chars).'
-    : null
-
-  const inp = settingsInp
-  const Label = SettingsLabel
-  const Row = SettingsRow
+    ? 'Name must start with a letter, use only letters, numbers, hyphens (3–32 chars).' : null
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
       <div>
-        <Label>Server name *</Label>
-        <input value={settings.name} onChange={e => set('name', e.target.value)} style={{ ...inp, borderColor: nameError ? C.red : C.border }}
+        <SettingsLabel>Server name *</SettingsLabel>
+        <input value={settings.name} onChange={e => set('name', e.target.value)}
+          style={{ ...settingsInp, borderColor: nameError ? C.red : C.border }}
           onFocus={e => { e.target.style.borderColor = nameError ? C.red : C.blue }}
           onBlur={e => { e.target.style.borderColor = nameError ? C.red : C.border }}
           placeholder="my-survival-server" />
         {nameError && <div style={{ fontSize: 11, color: C.red, marginTop: 4 }}>{nameError}</div>}
       </div>
-
-      <Row>
+      <SettingsRow>
         <div>
-          <Label>Memory (MB)</Label>
+          <SettingsLabel>Memory (MB)</SettingsLabel>
           <input type="number" min="512" value={settings.memory} onChange={e => set('memory', e.target.value)}
-            placeholder="e.g. 1024" style={inp}
+            placeholder="e.g. 1024" style={settingsInp}
             onFocus={e => { e.target.style.borderColor = C.blue }}
             onBlur={e => { e.target.style.borderColor = C.border }} />
         </div>
         <div>
-          <Label>Port</Label>
-          <input type="number" min="1024" max="65535" value={settings.port} onChange={e => set('port', e.target.value)} style={inp}
+          <SettingsLabel>Port</SettingsLabel>
+          <input type="number" min="1024" max="65535" value={settings.port} onChange={e => set('port', e.target.value)}
+            style={settingsInp}
             onFocus={e => { e.target.style.borderColor = C.blue }}
             onBlur={e => { e.target.style.borderColor = C.border }} />
         </div>
-      </Row>
-
-      <Row>
+      </SettingsRow>
+      <SettingsRow>
         <div>
-          <Label>Max players</Label>
-          <input type="number" min="1" max="500" value={settings.maxPlayers} onChange={e => set('maxPlayers', e.target.value)} style={inp}
+          <SettingsLabel>Max players</SettingsLabel>
+          <input type="number" min="1" max="500" value={settings.maxPlayers} onChange={e => set('maxPlayers', e.target.value)}
+            style={settingsInp}
             onFocus={e => { e.target.style.borderColor = C.blue }}
             onBlur={e => { e.target.style.borderColor = C.border }} />
         </div>
         <div>
-          <Label>Game mode</Label>
-          <select value={settings.gamemode} onChange={e => set('gamemode', e.target.value)} style={{ ...inp }}>
+          <SettingsLabel>Game mode</SettingsLabel>
+          <select value={settings.gamemode} onChange={e => set('gamemode', e.target.value)} style={{ ...settingsInp }}>
             {GAMEMODES.map(g => <option key={g} value={g}>{g.charAt(0).toUpperCase() + g.slice(1)}</option>)}
           </select>
         </div>
-      </Row>
-
+      </SettingsRow>
       <div>
-        <Label>MOTD</Label>
-        <input value={settings.motd} onChange={e => set('motd', e.target.value)} style={inp}
+        <SettingsLabel>MOTD</SettingsLabel>
+        <input value={settings.motd} onChange={e => set('motd', e.target.value)} style={settingsInp}
           onFocus={e => { e.target.style.borderColor = C.blue }}
           onBlur={e => { e.target.style.borderColor = C.border }}
           placeholder="A Minecraft Server" />
       </div>
-
-      <Row>
+      <SettingsRow>
         <ToggleField label="Online mode (auth)" value={settings.onlineMode} onChange={v => set('onlineMode', v)} />
         <ToggleField label="PvP enabled" value={settings.pvp} onChange={v => set('pvp', v)} />
-      </Row>
-    </div>
-  )
-}
-
-function ToggleField({ label, value, onChange }) {
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: C.surface2, border: `1px solid ${C.border}`, borderRadius: 8, padding: '12px 14px' }}>
-      <span style={{ fontSize: 13, color: C.text }}>{label}</span>
-      <button type="button" onClick={() => onChange(!value)} style={{
-        width: 40, height: 22, borderRadius: 11, border: 'none', cursor: 'pointer',
-        background: value ? C.green : C.border, position: 'relative', transition: 'background 200ms',
-      }}>
-        <div style={{
-          position: 'absolute', top: 3, left: value ? 21 : 3,
-          width: 16, height: 16, borderRadius: '50%', background: '#fff',
-          transition: 'left 200ms',
-        }} />
-      </button>
+      </SettingsRow>
     </div>
   )
 }
@@ -304,18 +845,17 @@ function ToggleField({ label, value, onChange }) {
 function StepReview({ engine, version, settings }) {
   const engineOpt = ENGINE_OPTIONS.find(e => e.id === engine) || {}
   const rows = [
-    ['Engine', engineOpt.label || engine],
-    ['Version', version],
-    ['Name', settings.name],
-    ['Memory', settings.memory ? `${settings.memory} MB` : '1024 MB'],
-    ['Port', settings.port],
+    ['Engine',      engineOpt.label || engine],
+    ['Version',     version],
+    ['Name',        settings.name],
+    ['Memory',      settings.memory ? `${settings.memory} MB` : '1024 MB'],
+    ['Port',        settings.port],
     ['Max Players', settings.maxPlayers],
-    ['Game mode', settings.gamemode],
+    ['Game mode',   settings.gamemode],
     ['Online mode', settings.onlineMode ? 'Yes' : 'No'],
-    ['PvP', settings.pvp ? 'Enabled' : 'Disabled'],
-    ['MOTD', settings.motd],
+    ['PvP',         settings.pvp ? 'Enabled' : 'Disabled'],
+    ['MOTD',        settings.motd],
   ]
-
   return (
     <div>
       <div style={{ fontSize: 14, color: C.muted, marginBottom: 20 }}>Review your configuration before creating.</div>
@@ -351,7 +891,6 @@ function CreatingAnimation({ progress, name }) {
   return (
     <div style={{ maxWidth: 480, margin: '0 auto', padding: '80px 24px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 32 }}>
       <div style={{ fontSize: 14, fontWeight: 600, color: C.text }}>{name || 'Creating server…'}</div>
-
       <div style={{ width: '100%', background: C.surface2, borderRadius: 4, height: 4, overflow: 'hidden' }}>
         <div style={{
           height: '100%', borderRadius: 4, background: C.green,
@@ -359,7 +898,6 @@ function CreatingAnimation({ progress, name }) {
           transition: 'width 600ms ease',
         }} />
       </div>
-
       <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 10 }}>
         {CREATE_STEPS.map((label, i) => {
           const done = i < progress

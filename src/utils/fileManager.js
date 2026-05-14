@@ -67,7 +67,12 @@ function writeServerProperties(serverPath, { port, name, maxPlayers, motd, gamem
  * @returns {boolean}
  */
 function serverJarExists(serverPath) {
-  return fs.existsSync(path.join(serverPath, 'server.jar'));
+  return fs.existsSync(path.join(serverPath, 'server.jar'))
+      || fs.existsSync(path.join(serverPath, 'run.sh'));
+}
+
+function usesRunScript(serverPath) {
+  return fs.existsSync(path.join(serverPath, 'run.sh'));
 }
 
 module.exports = {
@@ -75,4 +80,5 @@ module.exports = {
   writeEula,
   writeServerProperties,
   serverJarExists,
+  usesRunScript,
 };

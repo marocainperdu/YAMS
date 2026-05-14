@@ -1,13 +1,34 @@
 'use strict';
 
-const https = require('https');
-const http  = require('http');
-const fs    = require('fs');
-const path  = require('path');
+const https  = require('https');
+const http   = require('http');
+const fs     = require('fs');
+const fsp    = require('fs').promises;
+const path   = require('path');
+const { spawn } = require('child_process');
 
 // ---------------------------------------------------------------------------
 // HTTP helpers
 // ---------------------------------------------------------------------------
+
+function fetchText(url) {
+  return new Promise((resolve, reject) => {
+    const get = url.startsWith('https') ? https.get : http.get;
+    get(url, { headers: { 'User-Agent': 'YAMS/1.0' } }, res => {
+      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+        res.resume();
+        return fetchText(res.headers.location).then(resolve, reject);
+      }
+      if (res.statusCode !== 200) {
+        res.resume();
+        return reject(new Error(`HTTP ${res.statusCode} fetching ${url}`));
+      }
+      let raw = '';
+      res.on('data', c => { raw += c; });
+      res.on('end', () => resolve(raw));
+    }).on('error', reject);
+  });
+}
 
 function fetchJson(url) {
   return new Promise((resolve, reject) => {
@@ -94,6 +115,46 @@ async function getFabricUrl(version) {
   return `https://meta.fabricmc.net/v2/versions/loader/${version}/${loader}/${installer}/server/jar`;
 }
 
+async function installNeoForge(serverPath, mcVersion) {
+  const parts = mcVersion.split('.');
+  if (parts.length < 2) throw new Error(`Invalid MC version: ${mcVersion}`);
+  const major = parseInt(parts[1], 10);
+  const minor = parts.length >= 3 ? parseInt(parts[2], 10) : 0;
+
+  if (major < 20 || (major === 20 && minor < 2)) {
+    throw new Error(`NeoForge requires Minecraft 1.20.2 or newer (got ${mcVersion}). Use Fabric or Vanilla for older versions.`);
+  }
+
+  const prefix = `${major}.${minor}.`;
+  const xml = await fetchText('https://maven.neoforged.net/releases/net/neoforged/neoforge/maven-metadata.xml');
+  const versions = [...xml.matchAll(/<version>([^<]+)<\/version>/g)].map(m => m[1]);
+  const matching = versions.filter(v => v.startsWith(prefix));
+  if (!matching.length) throw new Error(`No NeoForge release found for Minecraft ${mcVersion}`);
+  const neoVersion = matching[matching.length - 1];
+
+  const installerUrl = `https://maven.neoforged.net/releases/net/neoforged/neoforge/${neoVersion}/neoforge-${neoVersion}-installer.jar`;
+  const installerPath = path.join(serverPath, 'neoforge-installer.jar');
+
+  console.log(`[YAMS] Downloading NeoForge ${neoVersion} installer...`);
+  await downloadFile(installerUrl, installerPath);
+
+  console.log(`[YAMS] Running NeoForge installer (this may take a minute)...`);
+  await new Promise((resolve, reject) => {
+    const proc = spawn('java', ['-jar', 'neoforge-installer.jar', '--installServer'], {
+      cwd: serverPath,
+      stdio: 'inherit',
+    });
+    proc.on('close', code => {
+      if (code === 0) resolve();
+      else reject(new Error(`NeoForge installer exited with code ${code}`));
+    });
+    proc.on('error', reject);
+  });
+
+  await fsp.unlink(installerPath).catch(() => {});
+  console.log(`[YAMS] NeoForge ${neoVersion} installed for MC ${mcVersion}`);
+}
+
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
@@ -103,12 +164,15 @@ async function getFabricUrl(version) {
  * and save it as `server.jar` inside serverPath.
  *
  * @param {string} serverPath  Absolute path to the server directory
- * @param {string} engine      'vanilla' | 'paper' | 'purpur' | 'fabric'
+ * @param {string} engine      'vanilla' | 'paper' | 'purpur' | 'fabric' | 'neoforge'
  * @param {string} version     Minecraft version string, e.g. '1.21.4'
  */
 async function downloadServerJar(serverPath, engine, version) {
-  const destPath = path.join(serverPath, 'server.jar');
+  if (engine === 'neoforge') {
+    return installNeoForge(serverPath, version);
+  }
 
+  const destPath = path.join(serverPath, 'server.jar');
   let url;
   switch (engine) {
     case 'vanilla': url = await getVanillaUrl(version); break;
@@ -116,10 +180,9 @@ async function downloadServerJar(serverPath, engine, version) {
     case 'purpur':  url = await getPurpurUrl(version);  break;
     case 'fabric':  url = await getFabricUrl(version);  break;
     case 'spigot':
-    case 'forge':
       throw new Error(
-        `${engine.charAt(0).toUpperCase() + engine.slice(1)} requires a manual installer. ` +
-        `Download the JAR from the official site and upload it as server.jar via the Files tab.`
+        'Spigot requires BuildTools to compile from source (needs Git + Maven, ~20 min). ' +
+        'Download the server JAR manually and upload it via the Files tab.'
       );
     default:
       throw new Error(`Unknown engine: ${engine}`);

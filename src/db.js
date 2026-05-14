@@ -32,16 +32,21 @@ function getDb() {
 function migrate(db) {
   db.exec(`
     CREATE TABLE IF NOT EXISTS servers (
-      id          TEXT    PRIMARY KEY,
-      name        TEXT    NOT NULL UNIQUE,
-      path        TEXT    NOT NULL,
-      port        INTEGER NOT NULL UNIQUE,
-      ram         TEXT    NOT NULL DEFAULT '1G',
-      status      TEXT    NOT NULL DEFAULT 'stopped'
-                          CHECK (status IN ('stopped', 'running')),
-      pid         INTEGER,
-      created_at  TEXT    NOT NULL DEFAULT (datetime('now')),
-      updated_at  TEXT    NOT NULL DEFAULT (datetime('now'))
+      id               TEXT    PRIMARY KEY,
+      name             TEXT    NOT NULL UNIQUE,
+      path             TEXT    NOT NULL,
+      port             INTEGER NOT NULL UNIQUE,
+      ram              TEXT    NOT NULL DEFAULT '1G',
+      status           TEXT    NOT NULL DEFAULT 'stopped'
+                               CHECK (status IN ('stopped', 'running', 'installing', 'install_failed')),
+      pid              INTEGER,
+      priority         INTEGER NOT NULL DEFAULT 0,
+      modpack_platform TEXT,
+      modpack_id       TEXT,
+      modpack_version  TEXT,
+      install_error    TEXT,
+      created_at       TEXT    NOT NULL DEFAULT (datetime('now')),
+      updated_at       TEXT    NOT NULL DEFAULT (datetime('now'))
     );
 
     CREATE TABLE IF NOT EXISTS users (
@@ -73,8 +78,48 @@ function migrate(db) {
     `ALTER TABLE users ADD COLUMN totp_secret TEXT`,
     `ALTER TABLE users ADD COLUMN totp_enabled INTEGER NOT NULL DEFAULT 0`,
     `ALTER TABLE users ADD COLUMN totp_last_code TEXT`,
+    `ALTER TABLE users ADD COLUMN avatar TEXT`,
   ]) {
     try { db.exec(sql); } catch (e) { if (!e.message.includes('duplicate column')) throw e; }
+  }
+
+  // Rebuild servers table to expand the status CHECK constraint and add modpack columns.
+  // Detected by checking for the modpack_platform column — absent on pre-modpack installs.
+  const serverCols = db.prepare('PRAGMA table_info(servers)').all().map(c => c.name);
+  if (!serverCols.includes('modpack_platform')) {
+    db.exec('PRAGMA foreign_keys = OFF');
+    db.transaction(() => {
+      db.exec(`
+        CREATE TABLE servers_v2 (
+          id               TEXT    PRIMARY KEY,
+          name             TEXT    NOT NULL UNIQUE,
+          path             TEXT    NOT NULL,
+          port             INTEGER NOT NULL UNIQUE,
+          ram              TEXT    NOT NULL DEFAULT '1G',
+          status           TEXT    NOT NULL DEFAULT 'stopped'
+                                   CHECK (status IN ('stopped', 'running', 'installing', 'install_failed')),
+          pid              INTEGER,
+          priority         INTEGER NOT NULL DEFAULT 0,
+          modpack_platform TEXT,
+          modpack_id       TEXT,
+          modpack_version  TEXT,
+          install_error    TEXT,
+          created_at       TEXT    NOT NULL DEFAULT (datetime('now')),
+          updated_at       TEXT    NOT NULL DEFAULT (datetime('now'))
+        )
+      `);
+      db.exec(`
+        INSERT INTO servers_v2
+          SELECT id, name, path, port, ram, status, pid,
+                 COALESCE(priority, 0),
+                 NULL, NULL, NULL, NULL, created_at, updated_at
+          FROM servers
+      `);
+      db.exec('DROP TABLE servers');
+      db.exec('ALTER TABLE servers_v2 RENAME TO servers');
+    })();
+    db.exec('PRAGMA foreign_keys = ON');
+    console.log('[YAMS] Migrated servers table to support modpack installation status');
   }
 
   db.exec(`

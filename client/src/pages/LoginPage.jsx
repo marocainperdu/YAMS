@@ -34,7 +34,7 @@ export default function LoginPage({ onLogin }) {
 
       const [, seg] = token.split('.')
       const payload = JSON.parse(atob(seg.replace(/-/g, '+').replace(/_/g, '/')))
-      onLogin({ id: payload.userId, role: payload.role, token, refreshToken: body.data?.refreshToken ?? null, forcePasswordChange: !!body.data?.forcePasswordChange, username: body.data?.username ?? username })
+      onLogin({ id: payload.userId, role: payload.role, token, refreshToken: body.data?.refreshToken ?? null, forcePasswordChange: !!body.data?.forcePasswordChange, username: body.data?.username ?? username, email: body.data?.email ?? null, avatar: body.data?.avatar ?? null })
     } catch {
       setError('Could not reach the server. Is YAMS running?')
     } finally {
@@ -127,7 +127,7 @@ export default function LoginPage({ onLogin }) {
           {tab === 'login' && (
             <form onSubmit={handleLogin} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                <label style={{ fontSize: 12, fontWeight: 500, color: C.muted }}>Username</label>
+                <label style={{ fontSize: 12, fontWeight: 500, color: C.muted }}>Username or email</label>
                 <input
                   type="text" value={username} onChange={e => setUsername(e.target.value)}
                   placeholder="admin" autoFocus autoComplete="username"

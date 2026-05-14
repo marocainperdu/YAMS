@@ -24,6 +24,7 @@ function hashToken(raw) {
   return crypto.createHash('sha256').update(raw).digest('hex');
 }
 
+
 function issueAccessToken(user) {
   return jwt.sign(
     { userId: user.id, role: user.role, tokenVersion: user.token_version },
@@ -68,7 +69,7 @@ async function login(username, password, totpCode) {
     throw badRequest('Username and password are required', 'MISSING_CREDENTIALS');
   }
 
-  const user = userModel.findByUsername(username);
+  const user = userModel.findByUsernameOrEmail(username);
 
   // Always run bcrypt compare to prevent timing oracle even when user is missing.
   // Use a dummy hash so the compare always takes the same time.
@@ -95,7 +96,7 @@ async function login(username, password, totpCode) {
 
   const accessToken  = issueAccessToken(user);
   const refreshToken = issueRefreshToken(user.id);
-  return { token: accessToken, refreshToken, username: user.username };
+  return { token: accessToken, refreshToken, username: user.username, email: user.email ?? null, avatar: user.avatar ?? null };
 }
 
 // ─── refresh ─────────────────────────────────────────────────────────────────
@@ -146,6 +147,7 @@ function getMe(userId) {
     username: user.username,
     role: user.role,
     email: user.email ?? null,
+    avatar: user.avatar ?? null,
     totpEnabled: !!user.totp_enabled,
   };
 }
@@ -194,4 +196,11 @@ async function seedAdmin() {
   console.log(`[YAMS] Admin user '${username}' created.`);
 }
 
-module.exports = { register, login, refresh, logout, logoutAll, seedAdmin, getMe, updateMe, changePassword };
+function updateAvatar(userId, dataUrl) {
+  const { badRequest } = require('../utils/errors');
+  if (dataUrl && !dataUrl.startsWith('data:image/')) throw badRequest('Invalid image format', 'INVALID_AVATAR');
+  userModel.updateAvatar(userId, dataUrl ?? null);
+  return getMe(userId);
+}
+
+module.exports = { register, login, refresh, logout, logoutAll, seedAdmin, getMe, updateMe, changePassword, updateAvatar };

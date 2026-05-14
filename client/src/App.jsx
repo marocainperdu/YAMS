@@ -1,5 +1,5 @@
 import React from 'react'
-import { C, apiFetch, useHashRouter, useGravatar } from './lib/yamsShared'
+import { C, apiFetch, useHashRouter } from './lib/yamsShared'
 import Dashboard from './pages/Dashboard'
 import ConsolePage from './pages/ConsolePage'
 import AccountPage from './pages/AccountPage'
@@ -131,7 +131,7 @@ function ForcePasswordChangeOverlay({ onDone }) {
 function AvatarDropdown({ currentUser, navigate, onLogout }) {
   const [open, setOpen] = React.useState(false)
   const ref = React.useRef(null)
-  const gravatarUrl = useGravatar(currentUser?.email, 64)
+  const avatarUrl = currentUser?.avatar ?? null
 
   React.useEffect(() => {
     function handler(e) { if (ref.current && !ref.current.contains(e.target)) setOpen(false) }
@@ -146,16 +146,16 @@ function AvatarDropdown({ currentUser, navigate, onLogout }) {
       <button
         onClick={() => setOpen(o => !o)}
         style={{
-          width: 32, height: 32, borderRadius: '50%',
+          width: 32, height: 32, borderRadius: '50%', padding: 0,
           background: open ? C.blue : C.surface2,
           border: `2px solid ${open ? C.blue : C.border}`,
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           color: open ? '#fff' : C.muted, fontSize: 13, fontWeight: 700,
-          cursor: 'pointer', transition: 'all 150ms', overflow: 'hidden',
+          cursor: 'pointer', transition: 'border-color 150ms', overflow: 'hidden',
         }}
       >
-        {gravatarUrl
-          ? <img src={gravatarUrl} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+        {avatarUrl
+          ? <img src={avatarUrl} style={{ width: 32, height: 32, objectFit: 'cover', borderRadius: '50%', display: 'block' }} />
           : initial}
       </button>
 
@@ -296,10 +296,16 @@ export default function App() {
     return () => window.removeEventListener('yams-auth-logout', onAutoLogout)
   }, [])
 
-  function handleLogin({ id, role, token, refreshToken, forcePasswordChange: fpc, username }) {
+  React.useEffect(() => {
+    if (!currentUser?.avatar) return
+    const img = new Image()
+    img.src = currentUser.avatar
+  }, [currentUser?.avatar])
+
+  function handleLogin({ id, role, token, refreshToken, forcePasswordChange: fpc, username, email, avatar }) {
     sessionStorage.setItem('yams_token', token)
     if (refreshToken) sessionStorage.setItem('yams_refresh_token', refreshToken)
-    const user = { id, role, username: username ?? null }
+    const user = { id, role, username: username ?? null, email: email ?? null, avatar: avatar ?? null }
     sessionStorage.setItem('yams_user', JSON.stringify(user))
     if (fpc) sessionStorage.setItem('yams_force_pw', 'true')
     else sessionStorage.removeItem('yams_force_pw')

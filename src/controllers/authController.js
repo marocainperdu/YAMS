@@ -78,4 +78,12 @@ async function changePassword(req, res, next) {
   } catch (err) { next(err); }
 }
 
-module.exports = { login, refresh, logout, logoutAll, register, getMe, updateMe, changePassword };
+async function updateAvatar(req, res, next) {
+  try {
+    const { avatar } = req.body ?? {};
+    const data = authService.updateAvatar(req.user.userId, avatar ?? null);
+    res.json({ data });
+  } catch (err) { next(err); }
+}
+
+module.exports = { login, refresh, logout, logoutAll, register, getMe, updateMe, changePassword, updateAvatar };
