@@ -32,6 +32,21 @@ function getStmts() {
       incrementTokenVersion: db.prepare(
         `UPDATE users SET token_version = token_version + 1 WHERE id = ?`
       ),
+      updateUsername: db.prepare(
+        `UPDATE users SET username = ? WHERE id = ?`
+      ),
+      updateEmail: db.prepare(
+        `UPDATE users SET email = ? WHERE id = ?`
+      ),
+      updatePassword: db.prepare(
+        `UPDATE users SET password_hash = ? WHERE id = ?`
+      ),
+      updateTotp: db.prepare(
+        `UPDATE users SET totp_secret = ?, totp_enabled = ? WHERE id = ?`
+      ),
+      updateTotpLastCode: db.prepare(
+        `UPDATE users SET totp_last_code = ? WHERE id = ?`
+      ),
     };
   }
   return stmts;
@@ -71,4 +86,28 @@ function incrementTokenVersion(id) {
   getStmts().incrementTokenVersion.run(id);
 }
 
-module.exports = { create, findById, findByUsername, count, findAll, updateRole, remove, incrementTokenVersion };
+function updateUsername(id, username) {
+  getStmts().updateUsername.run(username, id);
+}
+
+function updateEmail(id, email) {
+  getStmts().updateEmail.run(email ?? null, id);
+}
+
+function updatePassword(id, passwordHash) {
+  getStmts().updatePassword.run(passwordHash, id);
+}
+
+function updateTotp(id, { secret, enabled }) {
+  getStmts().updateTotp.run(secret ?? null, enabled ? 1 : 0, id);
+}
+
+function updateTotpLastCode(id, codeHash) {
+  getStmts().updateTotpLastCode.run(codeHash, id);
+}
+
+module.exports = {
+  create, findById, findByUsername, count, findAll,
+  updateRole, remove, incrementTokenVersion,
+  updateUsername, updateEmail, updatePassword, updateTotp, updateTotpLastCode,
+};

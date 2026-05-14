@@ -22,4 +22,13 @@ router.post('/logout-all', authMiddleware, controller.logoutAll);
 // POST /auth/register — admin only
 router.post('/register', authMiddleware, requireAdmin, controller.register);
 
+// GET  /auth/me       — returns current user profile
+router.get('/me',       authMiddleware, controller.getMe);
+
+// PATCH /auth/me      — update username / email
+router.patch('/me',     authMiddleware, controller.updateMe);
+
+// PATCH /auth/password — change own password
+router.patch('/password', authMiddleware, controller.changePassword);
+
 module.exports = router;

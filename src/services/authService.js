@@ -125,6 +125,51 @@ function logoutAll(userId) {
   refreshTokenModel.revokeAll(userId);
 }
 
+// ─── getMe ───────────────────────────────────────────────────────────────────
+
+function getMe(userId) {
+  const user = userModel.findById(userId);
+  if (!user) throw unauthorized('User not found', 'USER_NOT_FOUND');
+  return {
+    id: user.id,
+    username: user.username,
+    role: user.role,
+    email: user.email ?? null,
+    totpEnabled: !!user.totp_enabled,
+  };
+}
+
+// ─── updateMe ────────────────────────────────────────────────────────────────
+
+async function updateMe(userId, { username, email }) {
+  if (username !== undefined) {
+    if (typeof username !== 'string' || username.trim().length < 3)
+      throw badRequest('Username must be at least 3 characters', 'INVALID_USERNAME');
+    const existing = userModel.findByUsername(username.trim());
+    if (existing && existing.id !== userId)
+      throw conflict('Username already taken', 'USERNAME_TAKEN');
+    userModel.updateUsername(userId, username.trim());
+  }
+  if (email !== undefined) {
+    userModel.updateEmail(userId, email || null);
+  }
+  return getMe(userId);
+}
+
+// ─── changePassword ───────────────────────────────────────────────────────────
+
+async function changePassword(userId, currentPassword, newPassword) {
+  if (!currentPassword) throw badRequest('Current password is required', 'MISSING_CREDENTIALS');
+  if (!newPassword || newPassword.length < 8)
+    throw badRequest('New password must be at least 8 characters', 'INVALID_PASSWORD');
+  const user = userModel.findById(userId);
+  if (!user) throw unauthorized('User not found', 'USER_NOT_FOUND');
+  const match = await bcrypt.compare(currentPassword, user.password_hash);
+  if (!match) throw unauthorized('Current password is incorrect', 'WRONG_PASSWORD');
+  const hash = await bcrypt.hash(newPassword, BCRYPT_ROUNDS);
+  userModel.updatePassword(userId, hash);
+}
+
 // ─── seedAdmin ───────────────────────────────────────────────────────────────
 // Called once at startup when YAMS_ADMIN_USERNAME / YAMS_ADMIN_PASSWORD are set
 // and no users exist yet. Safe to call every boot — no-op if users already exist.
@@ -138,4 +183,4 @@ async function seedAdmin() {
   console.log(`[YAMS] Admin user '${username}' created.`);
 }
 
-module.exports = { register, login, refresh, logout, logoutAll, seedAdmin };
+module.exports = { register, login, refresh, logout, logoutAll, seedAdmin, getMe, updateMe, changePassword };

@@ -20,6 +20,7 @@ require('./src/services/schedulerService').init(); // start cron tick loop
 require('./src/services/webhookService').init();   // subscribe to server lifecycle events
 
 const authRoutes    = require('./src/routes/authRoutes');
+const twoFARoutes   = require('./src/routes/twoFARoutes');
 const serverRoutes  = require('./src/routes/serverRoutes');
 const fileRoutes    = require('./src/routes/fileRoutes');
 const backupRoutes  = require('./src/routes/backupRoutes');
@@ -60,6 +61,7 @@ app.use((req, _res, next) => {
 
 app.get('/health', (_req, res) => res.json({ status: 'ok' }));
 
+app.use('/auth/2fa',                twoFARoutes);
 app.use('/auth',                    authRoutes);
 app.use('/servers',                 serverRoutes);
 app.use('/servers/:id/files',       fileRoutes);

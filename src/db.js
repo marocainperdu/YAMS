@@ -68,6 +68,15 @@ function migrate(db) {
     if (!e.message.includes('duplicate column')) throw e;
   }
 
+  for (const sql of [
+    `ALTER TABLE users ADD COLUMN email TEXT`,
+    `ALTER TABLE users ADD COLUMN totp_secret TEXT`,
+    `ALTER TABLE users ADD COLUMN totp_enabled INTEGER NOT NULL DEFAULT 0`,
+    `ALTER TABLE users ADD COLUMN totp_last_code TEXT`,
+  ]) {
+    try { db.exec(sql); } catch (e) { if (!e.message.includes('duplicate column')) throw e; }
+  }
+
   db.exec(`
     CREATE TABLE IF NOT EXISTS refresh_tokens (
       id          TEXT    PRIMARY KEY,

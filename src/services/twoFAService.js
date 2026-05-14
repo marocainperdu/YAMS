@@ -59,7 +59,7 @@ function setup(userId) {
   // H3 — store encrypted secret; totp_enabled stays 0 until verified
   userModel.updateTotp(userId, { secret: encryptSecret(secret), enabled: false });
 
-  const otpauthUri = _totp.toURI({ label: user.email, issuer: ISSUER, secret });
+  const otpauthUri = _totp.toURI({ label: user.email || user.username, issuer: ISSUER, secret });
   return { secret, otpauthUri };
 }
 
