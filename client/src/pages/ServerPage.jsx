@@ -250,144 +250,17 @@ function WorldRow({ world, last, serverId, onAction }) {
   );
 }
 
-// ─── CreateWorldForm ──────────────────────────────────────────────────────────
-function CreateWorldForm({ onCancel, onCreate }) {
-  const [form, setForm] = React.useState({
-    name: '', gamemode: 'survival', difficulty: 'normal',
-    worldType: 'default', seed: '', structures: true, hardcore: false,
-  });
-  const [creating, setCreating] = React.useState(false);
-  const [done, setDone]         = React.useState(false);
-  const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
-
-  function submit(e) {
-    e.preventDefault();
-    if (!form.name.trim()) return;
-    setCreating(true);
-    setTimeout(() => { setDone(true); setTimeout(() => onCreate(form), 900); }, 1800);
-  }
-
-  if (creating) {
-    return (
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14, padding: '40px 0' }}>
-        <div style={{ width: 44, height: 44, borderRadius: 10, background: done ? `${C.green}18` : C.surface2, border: `1px solid ${done ? C.green : C.border}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20, transition: 'all 300ms' }}>
-          {done ? '✓' : '◼'}
-        </div>
-        <div style={{ fontSize: 14, fontWeight: 600, color: done ? C.green : C.text }}>
-          {done ? 'World created!' : `Generating "${form.name}"…`}
-        </div>
-        {!done && <div style={{ fontSize: 12, color: C.dim }}>Applying seed, terrain generation & structure placement</div>}
-      </div>
-    );
-  }
-
-  return (
-    <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-      <FieldRow label="World Name" hint="Used as the folder name on disk">
-        <input
-          value={form.name} onChange={e => set('name', e.target.value)}
-          placeholder="e.g. survival_v2" autoFocus
-          style={{ background: C.surface2, border: `1px solid ${C.border}`, borderRadius: 6, padding: '7px 12px', fontSize: 13, color: C.text, outline: 'none', width: '100%' }}
-        />
-      </FieldRow>
-
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-        <FieldRow label="Game Mode">
-          <Select value={form.gamemode} onChange={v => set('gamemode', v)} style={{ width: '100%' }} options={[
-            { value: 'survival', label: 'Survival' }, { value: 'creative', label: 'Creative' },
-            { value: 'adventure', label: 'Adventure' }, { value: 'spectator', label: 'Spectator' },
-          ]} />
-        </FieldRow>
-        <FieldRow label="Difficulty">
-          <Select value={form.difficulty} onChange={v => set('difficulty', v)} style={{ width: '100%' }} options={[
-            { value: 'peaceful', label: 'Peaceful' }, { value: 'easy', label: 'Easy' },
-            { value: 'normal', label: 'Normal' }, { value: 'hard', label: 'Hard' },
-          ]} />
-        </FieldRow>
-      </div>
-
-      <FieldRow label="World Type">
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8 }}>
-          {[
-            { value: 'default',      label: 'Default',      desc: 'Standard terrain' },
-            { value: 'flat',         label: 'Flat',         desc: 'Superflat world'  },
-            { value: 'large_biomes', label: 'Large Biomes', desc: '4× biome scale'   },
-            { value: 'amplified',    label: 'Amplified',    desc: 'Extreme height'   },
-          ].map(opt => (
-            <div
-              key={opt.value}
-              onClick={() => set('worldType', opt.value)}
-              style={{
-                padding: '10px 12px', borderRadius: 6, cursor: 'pointer',
-                border: `1px solid ${form.worldType === opt.value ? C.blue : C.border}`,
-                background: form.worldType === opt.value ? `${C.blue}10` : 'transparent',
-                transition: 'all 150ms',
-              }}
-            >
-              <div style={{ fontSize: 12, fontWeight: 600, color: form.worldType === opt.value ? C.blue : C.text }}>{opt.label}</div>
-              <div style={{ fontSize: 10, color: C.dim, marginTop: 3 }}>{opt.desc}</div>
-            </div>
-          ))}
-        </div>
-      </FieldRow>
-
-      <FieldRow label="Seed" hint="Leave blank for a random seed">
-        <input
-          value={form.seed} onChange={e => set('seed', e.target.value)}
-          placeholder="e.g. 8675309 or leave blank"
-          style={{ background: C.surface2, border: `1px solid ${C.border}`, borderRadius: 6, padding: '7px 12px', fontSize: 13, color: C.text, outline: 'none', width: '100%', fontFamily: "'JetBrains Mono', monospace" }}
-        />
-      </FieldRow>
-
-      <div style={{ display: 'flex', gap: 24 }}>
-        <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer' }}>
-          <Toggle value={form.structures} onChange={v => set('structures', v)} />
-          <div>
-            <div style={{ fontSize: 13, fontWeight: 500, color: C.text }}>Generate Structures</div>
-            <div style={{ fontSize: 11, color: C.dim }}>Villages, dungeons, strongholds…</div>
-          </div>
-        </label>
-        <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer' }}>
-          <Toggle value={form.hardcore} onChange={v => set('hardcore', v)} />
-          <div>
-            <div style={{ fontSize: 13, fontWeight: 500, color: C.text }}>Hardcore Mode</div>
-            <div style={{ fontSize: 11, color: C.dim }}>One life — hard difficulty locked</div>
-          </div>
-        </label>
-      </div>
-
-      <div style={{ display: 'flex', gap: 10, paddingTop: 4 }}>
-        <button
-          type="submit" disabled={!form.name.trim()}
-          style={{
-            fontSize: 13, fontWeight: 600, padding: '8px 20px', borderRadius: 6,
-            border: `1px solid ${form.name.trim() ? C.green + '66' : C.border}`,
-            background: form.name.trim() ? `${C.green}18` : 'transparent',
-            color: form.name.trim() ? C.green : C.dim,
-            cursor: form.name.trim() ? 'pointer' : 'default', transition: 'all 150ms',
-          }}
-        >Create World</button>
-        <button
-          type="button" onClick={onCancel}
-          style={{ fontSize: 13, fontWeight: 500, padding: '8px 20px', borderRadius: 6, border: `1px solid ${C.border}`, background: 'transparent', color: C.muted, cursor: 'pointer' }}
-        >Cancel</button>
-      </div>
-    </form>
-  );
-}
-
 // ─── TabWorlds ────────────────────────────────────────────────────────────────
 function TabWorlds({ serverId }) {
   const [worlds, setWorlds]         = React.useState(null);
   const [uploadFile, setUploadFile] = React.useState(null);
   const [uploading, setUploading]   = React.useState(false);
-  const [creating, setCreating]     = React.useState(false);
   const [successMsg, setSuccessMsg] = React.useState(null);
   const [errorMsg, setErrorMsg]     = React.useState(null);
 
   function load() {
     apiFetch(`/servers/${serverId}/worlds`)
-      .then(data => setWorlds(Array.isArray(data) ? data : []))
+      .then(data => setWorlds(Array.isArray(data.data) ? data.data : []))
       .catch(e => setErrorMsg(e.message));
   }
 
@@ -403,12 +276,6 @@ function TabWorlds({ serverId }) {
   function uploadDone() {
     setUploading(false); setUploadFile(null);
     flash('World installed successfully');
-    load();
-  }
-
-  function createDone(form) {
-    setCreating(false);
-    flash(`"${form.name}" created`);
     load();
   }
 
@@ -446,31 +313,15 @@ function TabWorlds({ serverId }) {
         </div>
       )}
 
-      {/* Add / Upload / Create section */}
+      {/* Upload world section */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <div style={{ fontSize: 11, fontWeight: 600, color: C.muted, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-            {creating ? 'Create New World' : 'Add World'}
-          </div>
-          {!creating && (
-            <button
-              onClick={() => setCreating(true)}
-              style={{ fontSize: 11, fontWeight: 600, padding: '4px 12px', borderRadius: 5, border: `1px solid ${C.green}55`, background: `${C.green}12`, color: C.green, cursor: 'pointer' }}
-            >+ Create New</button>
-          )}
+        <div style={{ fontSize: 11, fontWeight: 600, color: C.muted, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+          Import World
         </div>
-
-        {creating ? (
-          <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, padding: '20px 24px' }}>
-            <CreateWorldForm onCancel={() => setCreating(false)} onCreate={createDone} />
-          </div>
-        ) : uploading ? (
+        {uploading ? (
           <UploadProgress filename={uploadFile} onDone={uploadDone} serverId={serverId} />
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <UploadZone onFile={startUpload} />
-            <div style={{ fontSize: 11, color: C.dim }}>Or create a world from scratch using the button above.</div>
-          </div>
+          <UploadZone onFile={startUpload} />
         )}
       </div>
 
@@ -1196,7 +1047,7 @@ function TabWebhooks({ serverId }) {
 
 // ─── TabPrometheus ────────────────────────────────────────────────────────────
 function TabPrometheus({ serverId }) {
-  const endpoint = `/metrics/${serverId}`;
+  const endpoint = `/api/metrics/${serverId}`;
   const [copied, setCopied] = React.useState(false);
   function copy() {
     navigator.clipboard.writeText(window.location.origin + endpoint).then(() => {
