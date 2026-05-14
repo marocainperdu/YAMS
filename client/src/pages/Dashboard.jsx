@@ -302,7 +302,14 @@ export default function Dashboard({ navigate, extraServers = [] }) {
               servers={servers}
               navigate={navigate}
               reordering={reordering}
-              onReorder={ids => setServerOrder(ids)}
+              onReorder={async ids => {
+                setServerOrder(ids)
+                try {
+                  await apiFetch('/servers/reorder', { method: 'POST', body: JSON.stringify({ order: ids }) })
+                } catch (err) {
+                  console.error('[YAMS] Failed to save server order:', err)
+                }
+              }}
             />
           </div>
           <ActivityFeed logs={data.logs} />

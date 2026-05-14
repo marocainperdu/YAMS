@@ -189,7 +189,7 @@ function validateRam(ram) {
  * @param {{ name: string, port: number|string, ram: string }} params
  * @returns {object} The created server record
  */
-function createServer({ name, port, ram = '1G' }) {
+function createServer({ name, port, ram = '1G', maxPlayers, motd, gamemode, pvp, onlineMode }) {
   // 1. Validate inputs first — no side effects yet
   validateName(name);
   const validPort = validatePort(port);
@@ -210,7 +210,7 @@ function createServer({ name, port, ram = '1G' }) {
   try {
     fileManager.createServerDirectory(serverPath);
     fileManager.writeEula(serverPath);
-    fileManager.writeServerProperties(serverPath, { port: validPort, name });
+    fileManager.writeServerProperties(serverPath, { port: validPort, name, maxPlayers, motd, gamemode, pvp, onlineMode });
   } catch (err) {
     // Best-effort cleanup: the directory might be partially created
     // We don't try to delete it — leave it for the user to inspect
