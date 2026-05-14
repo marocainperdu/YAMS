@@ -49,6 +49,30 @@ export function apiUrl(path) {
   return `${API_PREFIX}${path.startsWith('/') ? '' : '/'}${path}`
 }
 
+// Singleton promise: if a refresh is already in-flight, callers share it.
+let _refreshing = null
+
+async function doRefresh() {
+  const rt = sessionStorage.getItem('yams_refresh_token')
+  if (!rt) throw new Error('no_refresh_token')
+  const res = await fetch(apiUrl('/auth/refresh'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ refreshToken: rt }),
+  })
+  if (!res.ok) throw new Error('refresh_failed')
+  const body = await res.json()
+  sessionStorage.setItem('yams_token', body.data.token)
+  if (body.data.refreshToken) sessionStorage.setItem('yams_refresh_token', body.data.refreshToken)
+}
+
+function forceLogout() {
+  sessionStorage.removeItem('yams_token')
+  sessionStorage.removeItem('yams_refresh_token')
+  sessionStorage.removeItem('yams_user')
+  window.dispatchEvent(new CustomEvent('yams-auth-logout'))
+}
+
 export async function apiFetch(path, opts = {}) {
   const token = sessionStorage.getItem('yams_token')
   const method = opts.method || 'GET'
@@ -68,10 +92,27 @@ export async function apiFetch(path, opts = {}) {
   console.log(`[YAMS] ← ${res.status} ${url}`, body)
 
   if (res.status === 401) {
-    sessionStorage.removeItem('yams_token')
-    sessionStorage.removeItem('yams_user')
-    window.dispatchEvent(new CustomEvent('yams-auth-logout'))
-    throw new Error('Session expired. Please sign in again.')
+    // Attempt a silent token refresh, then replay the original request once.
+    try {
+      if (!_refreshing) _refreshing = doRefresh().finally(() => { _refreshing = null })
+      await _refreshing
+    } catch {
+      forceLogout()
+      throw new Error('Session expired. Please sign in again.')
+    }
+
+    const newToken = sessionStorage.getItem('yams_token')
+    const retryRes = await fetch(url, { ...opts, headers: { ...headers, Authorization: `Bearer ${newToken}` } })
+    let retryBody
+    try { retryBody = await retryRes.json() } catch { retryBody = {} }
+
+    if (retryRes.status === 401) {
+      forceLogout()
+      throw new Error('Session expired. Please sign in again.')
+    }
+    if (retryRes.status === 403) throw new Error(retryBody.error || 'Access denied')
+    if (!retryRes.ok) throw new Error(retryBody.error || `HTTP ${retryRes.status}`)
+    return retryBody
   }
 
   if (res.status === 403) {

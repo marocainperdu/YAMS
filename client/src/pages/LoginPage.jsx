@@ -34,7 +34,7 @@ export default function LoginPage({ onLogin }) {
 
       const [, seg] = token.split('.')
       const payload = JSON.parse(atob(seg.replace(/-/g, '+').replace(/_/g, '/')))
-      onLogin({ id: payload.userId, role: payload.role, token, forcePasswordChange: !!body.data?.forcePasswordChange, username: body.data?.username ?? username })
+      onLogin({ id: payload.userId, role: payload.role, token, refreshToken: body.data?.refreshToken ?? null, forcePasswordChange: !!body.data?.forcePasswordChange, username: body.data?.username ?? username })
     } catch {
       setError('Could not reach the server. Is YAMS running?')
     } finally {

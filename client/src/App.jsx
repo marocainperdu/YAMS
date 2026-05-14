@@ -287,6 +287,7 @@ export default function App() {
   React.useEffect(() => {
     const onAutoLogout = () => {
       sessionStorage.removeItem('yams_token')
+      sessionStorage.removeItem('yams_refresh_token')
       sessionStorage.removeItem('yams_user')
       setCurrentUser(null)
     }
@@ -294,8 +295,9 @@ export default function App() {
     return () => window.removeEventListener('yams-auth-logout', onAutoLogout)
   }, [])
 
-  function handleLogin({ id, role, token, forcePasswordChange: fpc, username }) {
+  function handleLogin({ id, role, token, refreshToken, forcePasswordChange: fpc, username }) {
     sessionStorage.setItem('yams_token', token)
+    if (refreshToken) sessionStorage.setItem('yams_refresh_token', refreshToken)
     const user = { id, role, username: username ?? null }
     sessionStorage.setItem('yams_user', JSON.stringify(user))
     if (fpc) sessionStorage.setItem('yams_force_pw', 'true')
@@ -307,6 +309,7 @@ export default function App() {
 
   function handleLogout() {
     sessionStorage.removeItem('yams_token')
+    sessionStorage.removeItem('yams_refresh_token')
     sessionStorage.removeItem('yams_user')
     sessionStorage.removeItem('yams_force_pw')
     setCurrentUser(null)

@@ -117,7 +117,7 @@ async function refresh(rawToken) {
   refreshTokenModel.revoke(tokenHash);
   const accessToken     = issueAccessToken(user);
   const newRefreshToken = issueRefreshToken(user.id);
-  return { accessToken, refreshToken: newRefreshToken };
+  return { token: accessToken, refreshToken: newRefreshToken };
 }
 
 // ─── logout ──────────────────────────────────────────────────────────────────
