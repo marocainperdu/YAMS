@@ -9,8 +9,8 @@ services:
       # Minecraft server ports — one port per server you plan to run.
       - "25565-25665:25565-25665"
     volumes:
-      - yams-data:/app/data      # yams.db + SQLite WAL files
-      - yams-servers:/app/servers # server JARs, worlds, configs, backups
+      - ./data:/app/data         # yams.db + SQLite WAL files
+      - ./servers:/app/servers   # server JARs, worlds, configs, backups
     environment:
       NODE_ENV: production
       PORT: 3000
@@ -32,6 +32,3 @@ services:
       retries: 3
       start_period: 10s
 
-volumes:
-  yams-data:
-  yams-servers:

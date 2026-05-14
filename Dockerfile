@@ -25,7 +25,8 @@ RUN npm ci --omit=dev
 FROM node:22-alpine AS runtime
 
 # OpenJDK 21 JRE — required to spawn Minecraft server JVM processes
-RUN apk add --no-cache openjdk21-jre
+# su-exec — minimal setuid helper to drop from root to node user in entrypoint
+RUN apk add --no-cache openjdk21-jre su-exec
 
 WORKDIR /app
 
@@ -39,11 +40,15 @@ COPY src/ ./src/
 # Built frontend served as static files by Express
 COPY --from=builder /build/dist ./client/dist
 
-# Create runtime directories (actual data comes from mounted volumes)
+# Create runtime directories (actual data comes from bind mounts)
 RUN mkdir -p /app/data /app/servers \
  && chown -R node:node /app
 
-USER node
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+# Entrypoint runs as root briefly to fix bind-mount ownership, then drops to node
+USER root
 
 ENV PORT=3000 \
     BIND_ADDRESS=127.0.0.1 \
@@ -56,4 +61,4 @@ EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
   CMD wget -qO- http://127.0.0.1:3000/health || exit 1
 
-CMD ["node", "app.js"]
+ENTRYPOINT ["/entrypoint.sh"]

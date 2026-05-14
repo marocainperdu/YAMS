@@ -61,6 +61,50 @@ function writeServerProperties(serverPath, { port, name, maxPlayers, motd, gamem
 }
 
 /**
+ * Read and parse server.properties into a plain object.
+ * Unknown keys are included as-is. Returns {} if the file doesn't exist.
+ * @param {string} serverPath
+ * @returns {Record<string, string>}
+ */
+function readServerProperties(serverPath) {
+  const file = path.join(serverPath, 'server.properties');
+  if (!fs.existsSync(file)) return {};
+  return fs.readFileSync(file, 'utf8')
+    .split('\n')
+    .filter(l => l && !l.startsWith('#'))
+    .reduce((acc, l) => {
+      const eq = l.indexOf('=');
+      if (eq === -1) return acc;
+      acc[l.slice(0, eq).trim()] = l.slice(eq + 1).trim();
+      return acc;
+    }, {});
+}
+
+/**
+ * Update specific keys in an existing server.properties file, preserving
+ * all other lines exactly as they are (including unknown keys and comments).
+ * Falls back to writeServerProperties if the file doesn't exist.
+ * @param {string} serverPath
+ * @param {Record<string, string|number|boolean>} patches  Key-value pairs to update
+ */
+function patchServerProperties(serverPath, patches) {
+  const file = path.join(serverPath, 'server.properties');
+  if (!fs.existsSync(file)) return;
+  const lines = fs.readFileSync(file, 'utf8').split('\n');
+  const updated = new Set();
+  const result = lines.map(line => {
+    if (line.startsWith('#') || !line.includes('=')) return line;
+    const key = line.slice(0, line.indexOf('=')).trim();
+    if (key in patches) { updated.add(key); return `${key}=${patches[key]}`; }
+    return line;
+  });
+  for (const [key, val] of Object.entries(patches)) {
+    if (!updated.has(key)) result.push(`${key}=${val}`);
+  }
+  fs.writeFileSync(file, result.join('\n'), 'utf8');
+}
+
+/**
  * Check whether server.jar exists in the given server directory.
  * The user must place this file manually before starting the server.
  * @param {string} serverPath
@@ -79,6 +123,8 @@ module.exports = {
   createServerDirectory,
   writeEula,
   writeServerProperties,
+  readServerProperties,
+  patchServerProperties,
   serverJarExists,
   usesRunScript,
 };

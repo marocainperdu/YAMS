@@ -769,12 +769,66 @@ function listServers() {
 
 /**
  * @param {string} id
- * @returns {object} Server record
+ * @returns {object} Server record enriched with parsed server.properties
  */
 function getServer(id) {
   const server = serverModel.findById(id);
   if (!server) throw notFound(`Server '${id}' not found`);
-  return server;
+  const props = fileManager.readServerProperties(server.path);
+  return {
+    ...server,
+    motd:       props['motd']        ?? null,
+    maxPlayers: props['max-players'] ? Number(props['max-players']) : 20,
+    gamemode:   props['gamemode']    ?? 'survival',
+    pvp:        props['pvp'] !== undefined ? props['pvp'] === 'true' : true,
+    onlineMode: props['online-mode'] !== undefined ? props['online-mode'] === 'true' : true,
+  };
+}
+
+/**
+ * Update editable server settings: name, port, ram, and server.properties fields.
+ * The server must not be running (port change requires a restart anyway).
+ * @param {string} id
+ * @param {{ name?, port?, ram?, motd?, maxPlayers?, gamemode?, pvp?, onlineMode? }} fields
+ * @returns {object} Updated server record
+ */
+function updateServerSettings(id, fields) {
+  const server = serverModel.findById(id);
+  if (!server) throw notFound(`Server '${id}' not found`);
+  if (processes.has(id)) throw conflict('Stop the server before changing its settings');
+
+  const name       = fields.name       !== undefined ? fields.name       : server.name;
+  const port       = fields.port       !== undefined ? fields.port       : server.port;
+  const ram        = fields.ram        !== undefined ? fields.ram        : server.ram;
+
+  if (fields.name !== undefined) validateName(name);
+  const validPort = validatePort(port);
+  const validRam  = validateRam(ram);
+
+  if (fields.port !== undefined && validPort !== server.port) {
+    const conflict_ = serverModel.findByPort(validPort);
+    if (conflict_ && conflict_.id !== id) throw conflict(`Port ${validPort} is already in use`);
+  }
+  if (fields.name !== undefined && name !== server.name) {
+    const conflict_ = serverModel.findByName(name);
+    if (conflict_ && conflict_.id !== id) throw conflict(`A server named '${name}' already exists`);
+  }
+
+  serverModel.update(id, { name, port: validPort, ram: validRam });
+
+  const propPatches = {};
+  if (fields.port       !== undefined) propPatches['server-port']  = validPort;
+  if (fields.motd       !== undefined) propPatches['motd']         = fields.motd;
+  if (fields.maxPlayers !== undefined) propPatches['max-players']  = Number(fields.maxPlayers);
+  if (fields.gamemode   !== undefined) propPatches['gamemode']     = fields.gamemode;
+  if (fields.pvp        !== undefined) propPatches['pvp']          = fields.pvp ? 'true' : 'false';
+  if (fields.onlineMode !== undefined) propPatches['online-mode']  = fields.onlineMode ? 'true' : 'false';
+
+  if (Object.keys(propPatches).length > 0) {
+    fileManager.patchServerProperties(server.path, propPatches);
+  }
+
+  return getServer(id);
 }
 
 /**
@@ -810,7 +864,7 @@ function getChildProcess(serverId) {
 }
 
 module.exports = {
-  createServer, startServer, stopServer, deleteServer, listServers, getServer,
+  createServer, startServer, stopServer, deleteServer, listServers, getServer, updateServerSettings,
   subscribe, unsubscribe, sendCommand,
   cancelInstallServer, broadcastInstallEvent, clearInstallClients,
   getChildProcess,

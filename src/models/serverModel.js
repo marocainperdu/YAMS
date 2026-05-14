@@ -51,6 +51,9 @@ function getStmts() {
          SET status = ?, install_error = ?, updated_at = datetime('now')
          WHERE id = ?`
       ),
+      update: db.prepare(
+        `UPDATE servers SET name = ?, port = ?, ram = ?, updated_at = datetime('now') WHERE id = ?`
+      ),
       remove: db.prepare(
         `DELETE FROM servers WHERE id = ?`
       ),
@@ -142,6 +145,17 @@ function remove(id) {
   getStmts().remove.run(id);
 }
 
+/**
+ * Update name, port, and ram for a server.
+ * @param {string} id
+ * @param {{ name: string, port: number, ram: string }} fields
+ * @returns {object} Updated server row
+ */
+function update(id, { name, port, ram }) {
+  getStmts().update.run(name, port, ram, id);
+  return findById(id);
+}
+
 function reorder(orderedIds) {
   const db   = getDb();
   const stmt = getStmts().updatePriority;
@@ -150,4 +164,4 @@ function reorder(orderedIds) {
   })(orderedIds);
 }
 
-module.exports = { create, createFromModpack, findAll, findById, findByPort, findByName, updateStatus, updateInstallResult, remove, reorder };
+module.exports = { create, createFromModpack, findAll, findById, findByPort, findByName, updateStatus, updateInstallResult, update, remove, reorder };

@@ -107,6 +107,22 @@ function reorder(req, res, next) {
 }
 
 /**
+ * PATCH /servers/:id/settings
+ * Body: { name?, port?, ram?, motd?, maxPlayers?, gamemode?, pvp?, onlineMode? }
+ */
+async function updateSettings(req, res, next) {
+  try {
+    const { name, port, ram, motd, maxPlayers, gamemode, pvp, onlineMode } = req.body;
+    const server = await serverService.updateServerSettings(req.params.id, {
+      name, port, ram, motd, maxPlayers, gamemode, pvp, onlineMode,
+    });
+    res.json({ data: server });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
  * POST /servers/:id/cancel-install
  */
 async function cancelInstall(req, res, next) {
@@ -118,4 +134,4 @@ async function cancelInstall(req, res, next) {
   }
 }
 
-module.exports = { create, list, getOne, start, stop, remove, reorder, cancelInstall };
+module.exports = { create, list, getOne, start, stop, remove, reorder, cancelInstall, updateSettings };

@@ -96,7 +96,7 @@ function ServerTable({ servers: propServers, navigate, reordering, onReorder }) 
             onDragOver={reordering ? e => { e.preventDefault(); setOverIdx(i) } : undefined}
             onDrop={reordering ? () => handleDrop(i) : undefined}
             onDragEnd={reordering ? () => { setDragIdx(null); setOverIdx(null) } : undefined}
-            onClick={reordering ? undefined : () => navigate(`#/console/${srv.id}`)}
+            onClick={reordering ? undefined : () => navigate(`#/server/${srv.id}`)}
             onMouseEnter={() => setHovered(srv.id)}
             onMouseLeave={() => setHovered(null)}
             style={{
@@ -130,14 +130,14 @@ function ServerTable({ servers: propServers, navigate, reordering, onReorder }) 
             <div style={{ width: '20%', display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 8 }}>
               {!reordering && (
                 <button
-                  onClick={e => { e.stopPropagation(); navigate(`#/server/${srv.id}`) }}
+                  onClick={e => { e.stopPropagation(); navigate(`#/console/${srv.id}`) }}
                   style={{
                     fontSize: 11, fontWeight: 500, padding: '3px 10px', borderRadius: 4,
                     border: `1px solid ${C.border}`, background: 'transparent',
                     color: C.muted, cursor: 'pointer', transition: 'all 150ms',
                     opacity: isHov ? 1 : 0,
                   }}
-                >Manage</button>
+                >Console</button>
               )}
               {!reordering && isInstalling && (
                 <span style={{ fontSize: 11, fontWeight: 600, padding: '3px 10px', borderRadius: 4,

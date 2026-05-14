@@ -21,7 +21,8 @@ router.get('/',          requireServerPermission('read'),    controller.list);  
 router.post('/reorder',  requireServerPermission('control'), controller.reorder);  // POST /servers/reorder
 
 // Single resource
-router.get('/:id',        requireServerPermission('read'),    controller.getOne);  // GET    /servers/:id
+router.get('/:id',        requireServerPermission('read'),    controller.getOne);         // GET    /servers/:id
+router.patch('/:id/settings', requireServerPermission('control'), controller.updateSettings); // PATCH  /servers/:id/settings
 router.delete('/:id',     requireServerPermission('control'), controller.remove);  // DELETE /servers/:id
 router.post('/:id/start', heavyOpLimiter, requireServerPermission('control'), controller.start);   // POST /servers/:id/start
 router.post('/:id/stop',  requireServerPermission('control'), controller.stop);    // POST /servers/:id/stop

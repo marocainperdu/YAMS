@@ -9,9 +9,8 @@ const TABS = [
   { id: 'backups',    label: 'Backup Manager'  },
   { id: 'metrics',    label: 'Server Metrics'  },
   { id: 'scheduler',  label: 'Task Scheduler'  },
-  { id: 'reorder',    label: 'Server Re-ordering' },
   { id: 'webhooks',   label: 'Webhooks'        },
-  { id: 'prometheus', label: 'Open-Metrics'    },
+  { id: 'settings',   label: 'Settings'        },
 ];
 
 // ─── Shared small components ──────────────────────────────────────────────────
@@ -616,6 +615,56 @@ function TabMetrics({ serverId }) {
           ))}
         </div>
       )}
+
+      <PrometheusSection serverId={serverId} />
+    </div>
+  );
+}
+
+function PrometheusSection({ serverId }) {
+  const endpoint = `/api/metrics/${serverId}`;
+  const [copied, setCopied] = React.useState(false);
+  function copy() {
+    navigator.clipboard.writeText(window.location.origin + endpoint).then(() => {
+      setCopied(true); setTimeout(() => setCopied(false), 2000);
+    });
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <div style={{ fontSize: 11, fontWeight: 600, color: C.muted, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Prometheus / Open-Metrics</div>
+      <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <div style={{ fontSize: 13, fontWeight: 600, color: C.text }}>Scrape Endpoint</div>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <code style={{ flex: 1, background: C.surface2, border: `1px solid ${C.border}`, borderRadius: 5, padding: '8px 12px', fontSize: 12, color: C.blue, fontFamily: "'JetBrains Mono', monospace" }}>
+            {window.location.origin}{endpoint}
+          </code>
+          <button
+            onClick={copy}
+            style={{ fontSize: 11, fontWeight: 600, padding: '7px 12px', borderRadius: 5, border: `1px solid ${C.border}`, background: C.surface2, color: copied ? C.green : C.muted, cursor: 'pointer', flexShrink: 0, transition: 'color 150ms' }}
+          >{copied ? 'Copied!' : 'Copy'}</button>
+        </div>
+        <div style={{ fontSize: 12, color: C.dim, lineHeight: 1.6 }}>
+          Add this endpoint to your <code style={{ fontFamily: 'monospace', color: C.muted }}>prometheus.yml</code> scrape_configs. Metrics are updated every 15 seconds.
+        </div>
+      </div>
+      <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, padding: '14px 18px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+        <div style={{ fontSize: 11, fontWeight: 600, color: C.muted, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>Exported Metrics</div>
+        {[
+          ['yams_server_tps',             'gauge',   'Ticks per second (1m avg)'],
+          ['yams_server_players',         'gauge',   'Connected players'],
+          ['yams_server_memory_bytes',    'gauge',   'JVM heap usage in bytes'],
+          ['yams_server_cpu_percent',     'gauge',   'CPU usage percentage'],
+          ['yams_server_uptime_seconds',  'counter', 'Server uptime in seconds'],
+          ['yams_server_chunks_loaded',   'gauge',   'Loaded chunk count'],
+        ].map(([name, type, desc]) => (
+          <div key={name} style={{ display: 'flex', alignItems: 'baseline', gap: 12, padding: '5px 0', borderBottom: `1px solid ${C.borderLight}` }}>
+            <code style={{ fontSize: 11, color: C.blue, fontFamily: "'JetBrains Mono', monospace", minWidth: 240 }}>{name}</code>
+            <span style={{ fontSize: 10, color: C.purple, fontFamily: "'JetBrains Mono', monospace", minWidth: 60 }}>{type}</span>
+            <span style={{ fontSize: 11, color: C.dim }}>{desc}</span>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -792,88 +841,6 @@ function TabScheduler({ serverId }) {
   );
 }
 
-// ─── TabReorder ───────────────────────────────────────────────────────────────
-function TabReorder() {
-  const [servers,  setServers]  = React.useState(null);
-  const [drag,     setDrag]     = React.useState(null);
-  const [over,     setOver]     = React.useState(null);
-  const [saveState, setSaveState] = React.useState('idle'); // 'idle' | 'saving' | 'saved' | 'error'
-
-  React.useEffect(() => {
-    apiFetch('/servers')
-      .then(res => setServers((res.data || []).map((s, i) => ({ ...s, priority: i + 1 }))))
-      .catch(() => setServers([]));
-  }, []);
-
-  async function handleDrop(idx) {
-    if (drag === null || drag === idx) { setDrag(null); setOver(null); return; }
-    const reordered = [...servers];
-    const [moved] = reordered.splice(drag, 1);
-    reordered.splice(idx, 0, moved);
-    const withPriority = reordered.map((s, i) => ({ ...s, priority: i + 1 }));
-    setServers(withPriority);
-    setDrag(null); setOver(null);
-
-    setSaveState('saving');
-    try {
-      await apiFetch('/servers/reorder', {
-        method: 'POST',
-        body: JSON.stringify({ order: withPriority.map(s => s.id) }),
-      });
-      setSaveState('saved');
-      setTimeout(() => setSaveState('idle'), 2000);
-    } catch {
-      setSaveState('error');
-      setTimeout(() => setSaveState('idle'), 3000);
-    }
-  }
-
-  if (!servers) return <EmptyState message="Loading…" />;
-
-  const saveColors = { saving: C.muted, saved: C.green, error: C.red };
-  const saveLabels = { saving: 'Saving…', saved: 'Saved', error: 'Failed to save' };
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-        <span style={{ fontSize: 13, color: C.muted }}>Drag to set the display and startup order. Changes are saved automatically.</span>
-        <div style={{ flex: 1 }} />
-        {saveState !== 'idle' && (
-          <span style={{ fontSize: 12, color: saveColors[saveState], transition: 'color 200ms' }}>
-            {saveLabels[saveState]}
-          </span>
-        )}
-      </div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-        {servers.map((s, i) => (
-          <div
-            key={s.id}
-            draggable
-            onDragStart={() => setDrag(i)}
-            onDragOver={e => { e.preventDefault(); setOver(i); }}
-            onDrop={() => handleDrop(i)}
-            onDragEnd={() => { setDrag(null); setOver(null); }}
-            style={{
-              display: 'flex', alignItems: 'center', gap: 14, padding: '12px 16px',
-              background: over === i ? C.surface2 : C.surface,
-              border: `1px solid ${over === i ? C.blue : C.border}`,
-              borderRadius: 7, cursor: 'grab', transition: 'all 150ms',
-              opacity: drag === i ? 0.4 : 1,
-            }}
-          >
-            <span style={{ color: C.dim, fontSize: 13, userSelect: 'none' }}>⠿</span>
-            <span style={{ width: 22, height: 22, borderRadius: 4, background: C.surface2, border: `1px solid ${C.border}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, color: C.muted }}>
-              {s.priority}
-            </span>
-            <span style={{ fontSize: 13, fontWeight: 500, color: C.text, flex: 1 }}>{s.name}</span>
-            <StatusDot status={s.status} />
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
 // ─── WebhookModal ─────────────────────────────────────────────────────────────
 const ALL_EVENTS = ['server.start', 'server.stop', 'server.crash'];
 
@@ -1045,58 +1012,224 @@ function TabWebhooks({ serverId }) {
   );
 }
 
-// ─── TabPrometheus ────────────────────────────────────────────────────────────
-function TabPrometheus({ serverId }) {
-  const endpoint = `/api/metrics/${serverId}`;
-  const [copied, setCopied] = React.useState(false);
-  function copy() {
-    navigator.clipboard.writeText(window.location.origin + endpoint).then(() => {
-      setCopied(true); setTimeout(() => setCopied(false), 2000);
-    });
+// ─── TabSettings ─────────────────────────────────────────────────────────────
+function DeleteServerModal({ serverName, serverId, onClose, onDeleted }) {
+  const [confirm, setConfirm] = React.useState('')
+  const [deleting, setDeleting] = React.useState(false)
+  const [errMsg, setErrMsg] = React.useState(null)
+  const match = confirm === serverName
+
+  async function handleDelete() {
+    if (!match) return
+    setDeleting(true); setErrMsg(null)
+    try {
+      await apiFetch(`/servers/${serverId}`, { method: 'DELETE' })
+      onDeleted()
+    } catch (err) {
+      setErrMsg(err.message); setDeleting(false)
+    }
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-      <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 14 }}>
-        <div style={{ fontSize: 13, fontWeight: 600, color: C.text }}>Prometheus Scrape Endpoint</div>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          <code style={{ flex: 1, background: C.surface2, border: `1px solid ${C.border}`, borderRadius: 5, padding: '8px 12px', fontSize: 12, color: C.blue, fontFamily: "'JetBrains Mono', monospace" }}>
-            {window.location.origin}{endpoint}
-          </code>
-          <button
-            onClick={copy}
-            style={{ fontSize: 11, fontWeight: 600, padding: '7px 12px', borderRadius: 5, border: `1px solid ${C.border}`, background: C.surface2, color: copied ? C.green : C.muted, cursor: 'pointer', flexShrink: 0, transition: 'color 150ms' }}
-          >{copied ? 'Copied!' : 'Copy'}</button>
+    <div style={{ position: 'fixed', inset: 0, zIndex: 500, background: '#00000088', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+      onClick={e => { if (e.target === e.currentTarget) onClose() }}>
+      <div style={{ width: 440, background: C.surface, border: `1px solid ${C.red}55`, borderRadius: 12, overflow: 'hidden', boxShadow: '0 16px 48px #00000066' }}>
+        <div style={{ padding: '16px 20px', borderBottom: `1px solid ${C.border}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <span style={{ fontSize: 14, fontWeight: 600, color: C.red }}>Delete Server</span>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', color: C.muted, fontSize: 18, cursor: 'pointer', lineHeight: 1 }}>×</button>
         </div>
-        <div style={{ fontSize: 12, color: C.dim, lineHeight: 1.6 }}>
-          Add this endpoint to your <code style={{ fontFamily: 'monospace', color: C.muted }}>prometheus.yml</code> scrape_configs. Metrics are updated every 15 seconds.
-        </div>
-      </div>
-      <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 8 }}>
-        <div style={{ fontSize: 11, fontWeight: 600, color: C.muted, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>Exported Metrics</div>
-        {[
-          ['yams_server_tps',             'gauge',   'Ticks per second (1m avg)'],
-          ['yams_server_players',         'gauge',   'Connected players'],
-          ['yams_server_memory_bytes',    'gauge',   'JVM heap usage in bytes'],
-          ['yams_server_cpu_percent',     'gauge',   'CPU usage percentage'],
-          ['yams_server_uptime_seconds',  'counter', 'Server uptime in seconds'],
-          ['yams_server_chunks_loaded',   'gauge',   'Loaded chunk count'],
-        ].map(([name, type, desc]) => (
-          <div key={name} style={{ display: 'flex', alignItems: 'baseline', gap: 12, padding: '5px 0', borderBottom: `1px solid ${C.borderLight}` }}>
-            <code style={{ fontSize: 11, color: C.blue, fontFamily: "'JetBrains Mono', monospace", minWidth: 240 }}>{name}</code>
-            <span style={{ fontSize: 10, color: C.purple, fontFamily: "'JetBrains Mono', monospace", minWidth: 60 }}>{type}</span>
-            <span style={{ fontSize: 11, color: C.dim }}>{desc}</span>
+        <div style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+          {errMsg && (
+            <div style={{ background: `${C.red}10`, border: `1px solid ${C.red}44`, borderRadius: 6, padding: '10px 14px', fontSize: 13, color: C.red }}>{errMsg}</div>
+          )}
+          <div style={{ fontSize: 13, color: C.text, lineHeight: 1.6 }}>
+            This will permanently delete <strong style={{ color: C.text }}>{serverName}</strong> and all its files. This action <strong style={{ color: C.red }}>cannot be undone</strong>.
           </div>
-        ))}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <label style={{ fontSize: 12, color: C.muted }}>
+              To confirm, type <span style={{ fontFamily: 'monospace', color: C.text, fontWeight: 600 }}>{serverName}</span> below:
+            </label>
+            <input
+              value={confirm}
+              onChange={e => setConfirm(e.target.value)}
+              autoFocus
+              placeholder={serverName}
+              style={{
+                background: C.surface2, border: `1px solid ${match ? C.red + '88' : C.border}`,
+                borderRadius: 6, padding: '8px 12px', fontSize: 13, color: C.text,
+                outline: 'none', width: '100%', boxSizing: 'border-box',
+                transition: 'border-color 150ms',
+              }}
+              onKeyDown={e => { if (e.key === 'Enter' && match) handleDelete() }}
+            />
+          </div>
+          <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+            <button onClick={onClose} style={{ fontSize: 13, padding: '7px 14px', borderRadius: 6, border: `1px solid ${C.border}`, background: 'transparent', color: C.muted, cursor: 'pointer' }}>Cancel</button>
+            <button
+              onClick={handleDelete}
+              disabled={!match || deleting}
+              style={{
+                fontSize: 13, fontWeight: 600, padding: '7px 16px', borderRadius: 6,
+                border: `1px solid ${C.red}55`, background: match ? `${C.red}22` : C.surface2,
+                color: match ? C.red : C.dim,
+                cursor: (!match || deleting) ? 'default' : 'pointer',
+                opacity: deleting ? 0.6 : 1, transition: 'all 150ms',
+              }}
+            >{deleting ? 'Deleting…' : 'Delete Server'}</button>
+          </div>
+        </div>
       </div>
     </div>
-  );
+  )
+}
+
+function TabSettings({ serverId, server, onUpdated, onDeleted, navigate }) {
+  const [name,       setName]       = React.useState(server.name ?? '')
+  const [port,       setPort]       = React.useState(String(server.port ?? ''))
+  const [ram,        setRam]        = React.useState(server.ram ?? '1G')
+  const [motd,       setMotd]       = React.useState(server.motd ?? '')
+  const [maxPlayers, setMaxPlayers] = React.useState(String(server.maxPlayers ?? 20))
+  const [gamemode,   setGamemode]   = React.useState(server.gamemode ?? 'survival')
+  const [pvp,        setPvp]        = React.useState(server.pvp !== false)
+  const [onlineMode, setOnlineMode] = React.useState(server.onlineMode !== false)
+
+  const [saving,      setSaving]      = React.useState(false)
+  const [showDelete,  setShowDelete]  = React.useState(false)
+  const [okMsg,   setOkMsg]   = React.useState(null)
+  const [errMsg,  setErrMsg]  = React.useState(null)
+
+  async function handleSubmit(e) {
+    e.preventDefault()
+    setSaving(true); setErrMsg(null); setOkMsg(null)
+    try {
+      const res = await apiFetch(`/servers/${serverId}/settings`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          name, port: Number(port), ram,
+          motd: motd || undefined,
+          maxPlayers: Number(maxPlayers),
+          gamemode, pvp, onlineMode,
+        }),
+      })
+      setOkMsg('Settings saved')
+      setTimeout(() => setOkMsg(null), 4000)
+      onUpdated(res.data)
+    } catch (err) {
+      setErrMsg(err.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const inp = {
+    background: C.surface2, border: `1px solid ${C.border}`, borderRadius: 6,
+    padding: '8px 12px', fontSize: 13, color: C.text, outline: 'none', width: '100%', boxSizing: 'border-box',
+  }
+
+  return (
+    <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 24, maxWidth: 600 }}>
+      {okMsg  && <div style={{ background: `${C.green}10`, border: `1px solid ${C.green}44`, borderRadius: 6, padding: '10px 14px', fontSize: 13, color: C.green }}>✓ {okMsg}</div>}
+      {errMsg && <div style={{ background: `${C.red}10`,   border: `1px solid ${C.red}44`,   borderRadius: 6, padding: '10px 14px', fontSize: 13, color: C.red }}>{errMsg}</div>}
+
+      {/* General */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+        <div style={{ fontSize: 11, fontWeight: 600, color: C.muted, textTransform: 'uppercase', letterSpacing: '0.06em' }}>General</div>
+        <FieldRow label="Server Name" hint="Must be 3–32 chars, start with a letter, letters/digits/hyphens only.">
+          <input value={name} onChange={e => setName(e.target.value)} style={inp}
+            onFocus={e => { e.target.style.borderColor = C.blue }} onBlur={e => { e.target.style.borderColor = C.border }} />
+        </FieldRow>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          <FieldRow label="Port" hint="1024–65535">
+            <input type="number" value={port} onChange={e => setPort(e.target.value)} min={1024} max={65535} style={inp}
+              onFocus={e => { e.target.style.borderColor = C.blue }} onBlur={e => { e.target.style.borderColor = C.border }} />
+          </FieldRow>
+          <FieldRow label="RAM" hint="e.g. 1G, 2G, 512M">
+            <input value={ram} onChange={e => setRam(e.target.value)} placeholder="1G" style={inp}
+              onFocus={e => { e.target.style.borderColor = C.blue }} onBlur={e => { e.target.style.borderColor = C.border }} />
+          </FieldRow>
+        </div>
+      </div>
+
+      {/* Gameplay */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+        <div style={{ fontSize: 11, fontWeight: 600, color: C.muted, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Gameplay</div>
+        <FieldRow label="MOTD" hint="Message shown in the server list.">
+          <input value={motd} onChange={e => setMotd(e.target.value)} placeholder={`A YAMS Server - ${server.name}`} style={inp}
+            onFocus={e => { e.target.style.borderColor = C.blue }} onBlur={e => { e.target.style.borderColor = C.border }} />
+        </FieldRow>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          <FieldRow label="Max Players">
+            <input type="number" value={maxPlayers} onChange={e => setMaxPlayers(e.target.value)} min={1} max={1000} style={inp}
+              onFocus={e => { e.target.style.borderColor = C.blue }} onBlur={e => { e.target.style.borderColor = C.border }} />
+          </FieldRow>
+          <FieldRow label="Gamemode">
+            <Select value={gamemode} onChange={setGamemode} options={[
+              { value: 'survival',  label: 'Survival'  },
+              { value: 'creative',  label: 'Creative'  },
+              { value: 'adventure', label: 'Adventure' },
+              { value: 'spectator', label: 'Spectator' },
+            ]} />
+          </FieldRow>
+        </div>
+        <div style={{ display: 'flex', gap: 24 }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer' }}>
+            <Toggle value={pvp} onChange={setPvp} />
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 500, color: C.text }}>PvP</div>
+              <div style={{ fontSize: 11, color: C.dim }}>Allow players to attack each other</div>
+            </div>
+          </label>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer' }}>
+            <Toggle value={onlineMode} onChange={setOnlineMode} />
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 500, color: C.text }}>Online Mode</div>
+              <div style={{ fontSize: 11, color: C.dim }}>Authenticate players with Mojang</div>
+            </div>
+          </label>
+        </div>
+      </div>
+
+      <div style={{ display: 'flex', justifyContent: 'flex-end', paddingTop: 4 }}>
+        <button type="submit" disabled={saving} style={{
+          fontSize: 13, fontWeight: 600, padding: '8px 20px', borderRadius: 6,
+          border: `1px solid ${C.blue}55`, background: `${C.blue}18`, color: C.blue,
+          cursor: saving ? 'default' : 'pointer', opacity: saving ? 0.6 : 1,
+        }}>{saving ? 'Saving…' : 'Save Settings'}</button>
+      </div>
+
+      {/* Danger zone */}
+      <div style={{ borderTop: `1px solid ${C.red}33`, paddingTop: 20, display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <div style={{ fontSize: 11, fontWeight: 600, color: C.red, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Danger Zone</div>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: `${C.red}08`, border: `1px solid ${C.red}33`, borderRadius: 8, padding: '14px 18px' }}>
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 500, color: C.text }}>Delete this server</div>
+            <div style={{ fontSize: 12, color: C.dim, marginTop: 2 }}>Permanently removes the server and all its files.</div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setShowDelete(true)}
+            style={{ fontSize: 12, fontWeight: 600, padding: '6px 14px', borderRadius: 6, border: `1px solid ${C.red}55`, background: 'transparent', color: C.red, cursor: 'pointer', flexShrink: 0 }}
+          >Delete Server</button>
+        </div>
+      </div>
+
+      {showDelete && (
+        <DeleteServerModal
+          serverName={server.name}
+          serverId={serverId}
+          onClose={() => setShowDelete(false)}
+          onDeleted={onDeleted}
+        />
+      )}
+    </form>
+  )
 }
 
 // ─── ServerPage ───────────────────────────────────────────────────────────────
 function ServerPage({ serverId, navigate }) {
-  const [server, setServer] = React.useState(null);
-  const [notFound, setNotFound] = React.useState(false);
+  const [server, setServer]         = React.useState(null);
+  const [notFound, setNotFound]     = React.useState(false);
+  const [actionLoading, setActionLoading] = React.useState(false);
   const [tab, setTab] = React.useState(() => {
     return sessionStorage.getItem(`yams-server-tab-${serverId}`) || 'worlds';
   });
@@ -1133,9 +1266,8 @@ function ServerPage({ serverId, navigate }) {
     backups:    <TabBackups   serverId={serverId} />,
     metrics:    <TabMetrics   serverId={serverId} />,
     scheduler:  <TabScheduler serverId={serverId} />,
-    reorder:    <TabReorder   serverId={serverId} />,
     webhooks:   <TabWebhooks  serverId={serverId} />,
-    prometheus: <TabPrometheus serverId={serverId} />,
+    settings:   <TabSettings  serverId={serverId} server={server} onUpdated={setServer} onDeleted={() => navigate('#/')} navigate={navigate} />,
   };
 
   return (
@@ -1167,6 +1299,28 @@ function ServerPage({ serverId, navigate }) {
             ))}
           </div>
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
+            {(server.status === 'stopped' || server.status === 'running') && (
+              <button
+                disabled={actionLoading}
+                onClick={async () => {
+                  const action = server.status === 'running' ? 'stop' : 'start';
+                  setActionLoading(true);
+                  try {
+                    const res = await apiFetch(`/servers/${serverId}/${action}`, { method: 'POST' });
+                    setServer(res.data);
+                  } catch {}
+                  setActionLoading(false);
+                }}
+                style={{
+                  fontSize: 12, fontWeight: 600, padding: '5px 12px', borderRadius: 5,
+                  border: `1px solid ${server.status === 'running' ? C.red + '55' : C.green + '55'}`,
+                  background: server.status === 'running' ? `${C.red}18` : `${C.green}18`,
+                  color: server.status === 'running' ? C.red : C.green,
+                  cursor: actionLoading ? 'default' : 'pointer', opacity: actionLoading ? 0.6 : 1,
+                  transition: 'opacity 150ms',
+                }}
+              >{actionLoading ? '…' : server.status === 'running' ? 'Stop' : 'Start'}</button>
+            )}
             <button
               onClick={() => navigate(`#/console/${serverId}`)}
               style={{ fontSize: 12, fontWeight: 600, padding: '5px 12px', borderRadius: 5, border: `1px solid ${C.blue}55`, background: `${C.blue}18`, color: C.blue, cursor: 'pointer' }}

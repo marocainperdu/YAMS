@@ -152,13 +152,6 @@ Images are built automatically on every push to `main` and on every version tag.
 
 To build from source instead of pulling, replace `image:` with `build: .` in `compose.yml`.
 
-### Release a new version
-
-```sh
-git tag v1.0.0
-git push origin v1.0.0
-```
-
 The workflow builds `momokabil/yams:1.0.0`, `:1.0`, `:1`, and `:latest`.
 
 ### Required GitHub secrets (maintainers)
