@@ -17,6 +17,7 @@ const { getDb } = require('./src/db');
 require('./src/services/serverService');
 require('./src/services/metricsService').init();   // start log parsing listeners
 require('./src/services/schedulerService').init(); // start cron tick loop
+require('./src/services/webhookService').init();   // subscribe to server lifecycle events
 
 const authRoutes    = require('./src/routes/authRoutes');
 const serverRoutes  = require('./src/routes/serverRoutes');
@@ -25,6 +26,7 @@ const backupRoutes  = require('./src/routes/backupRoutes');
 const worldRoutes   = require('./src/routes/worldRoutes');
 const metricsRoutes   = require('./src/routes/metricsRoutes');
 const scheduleRoutes  = require('./src/routes/scheduleRoutes');
+const webhookRoutes   = require('./src/routes/webhookRoutes');
 const { userRouter, permissionRouter } = require('./src/routes/userRoutes');
 const swaggerSpec = require('./src/swagger');
 const { createWsServer } = require('./src/websocket/wsServer');
@@ -64,6 +66,7 @@ app.use('/servers/:id/files',       fileRoutes);
 app.use('/servers/:id/backups',     backupRoutes);
 app.use('/servers/:id/worlds',      worldRoutes);
 app.use('/servers/:id/schedules',   scheduleRoutes);
+app.use('/servers/:id/webhooks',    webhookRoutes);
 app.use('/metrics',                 metricsRoutes);
 app.use('/users',                   userRouter);
 app.use('/permissions',             permissionRouter);
