@@ -1,5 +1,5 @@
 import React from 'react'
-import { C, apiFetch, useHashRouter } from './lib/yamsShared'
+import { C, apiFetch, useHashRouter, useGravatar } from './lib/yamsShared'
 import Dashboard from './pages/Dashboard'
 import ConsolePage from './pages/ConsolePage'
 import AccountPage from './pages/AccountPage'
@@ -131,6 +131,7 @@ function ForcePasswordChangeOverlay({ onDone }) {
 function AvatarDropdown({ currentUser, navigate, onLogout }) {
   const [open, setOpen] = React.useState(false)
   const ref = React.useRef(null)
+  const gravatarUrl = useGravatar(currentUser?.email, 64)
 
   React.useEffect(() => {
     function handler(e) { if (ref.current && !ref.current.contains(e.target)) setOpen(false) }
@@ -153,8 +154,8 @@ function AvatarDropdown({ currentUser, navigate, onLogout }) {
           cursor: 'pointer', transition: 'all 150ms', overflow: 'hidden',
         }}
       >
-        {currentUser?.avatar
-          ? <img src={currentUser.avatar} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+        {gravatarUrl
+          ? <img src={gravatarUrl} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
           : initial}
       </button>
 

@@ -1,5 +1,5 @@
 import React from 'react'
-import { apiFetch, C, EmptyState } from '../lib/yamsShared'
+import { apiFetch, C, EmptyState, useGravatar } from '../lib/yamsShared'
 
 const ROLES = {
   admin:    { label: 'Admin',    color: '#a371f7', desc: 'Full access to everything' },
@@ -33,9 +33,13 @@ function RoleBadge({ role }) {
 }
 
 function UserAvatar({ user, size = 32 }) {
+  const gravatarUrl = useGravatar(user.email, size * 2)
+  const initial = (user.username || '?')[0].toUpperCase()
   return (
-    <div style={{ width: size, height: size, borderRadius: '50%', flexShrink: 0, background: C.surface2, border: `1px solid ${C.border}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: Math.round(size * 0.38), fontWeight: 600, color: C.muted }}>
-      {user.avatar}
+    <div style={{ width: size, height: size, borderRadius: '50%', flexShrink: 0, background: C.surface2, border: `1px solid ${C.border}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: Math.round(size * 0.38), fontWeight: 600, color: C.muted, overflow: 'hidden' }}>
+      {gravatarUrl
+        ? <img src={gravatarUrl} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+        : initial}
     </div>
   )
 }
@@ -211,7 +215,7 @@ export default function UsersPage({ currentUser }) {
       id: u.id,
       username: u.username,
       role: u.role,
-      avatar: u.username?.[0]?.toUpperCase() ?? '?',
+      email: u.email || null,
     }
   }
 

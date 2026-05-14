@@ -10,12 +10,12 @@ const serverService = require('../services/serverService');
 
 /**
  * POST /servers
- * Body: { name, port, ram?, maxPlayers?, motd?, gamemode?, pvp?, onlineMode? }
+ * Body: { name, port, ram?, engine?, version?, maxPlayers?, motd?, gamemode?, pvp?, onlineMode? }
  */
 async function create(req, res, next) {
   try {
-    const { name, port, ram, maxPlayers, motd, gamemode, pvp, onlineMode } = req.body;
-    const server = serverService.createServer({ name, port, ram, maxPlayers, motd, gamemode, pvp, onlineMode });
+    const { name, port, ram, engine, version, maxPlayers, motd, gamemode, pvp, onlineMode } = req.body;
+    const server = await serverService.createServer({ name, port, ram, engine, version, maxPlayers, motd, gamemode, pvp, onlineMode });
     res.status(201).json({ data: server });
   } catch (err) {
     next(err);

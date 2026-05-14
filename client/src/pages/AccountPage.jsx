@@ -1,5 +1,5 @@
 import React from 'react'
-import { apiFetch, C } from '../lib/yamsShared'
+import { apiFetch, C, useGravatar } from '../lib/yamsShared'
 
 export default function AccountPage({ currentUser, onUpdate }) {
   const [tab, setTab] = React.useState('profile')
@@ -36,6 +36,7 @@ export default function AccountPage({ currentUser, onUpdate }) {
 function ProfileTab({ currentUser, onUpdate }) {
   const [name, setName] = React.useState(currentUser?.username || '')
   const [email, setEmail] = React.useState(currentUser?.email || '')
+  const gravatarUrl = useGravatar(email || currentUser?.email, 128)
   const [saved, setSaved] = React.useState(false)
   const [loading, setLoading] = React.useState(false)
   const [error, setError] = React.useState(null)
@@ -86,14 +87,15 @@ function ProfileTab({ currentUser, onUpdate }) {
           width: 64, height: 64, borderRadius: '50%', background: C.surface2,
           border: `2px solid ${C.border}`, display: 'flex', alignItems: 'center',
           justifyContent: 'center', fontSize: 24, color: C.muted, flexShrink: 0,
+          overflow: 'hidden',
         }}>
-          {currentUser?.avatar
-            ? <img src={currentUser.avatar} style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} />
+          {gravatarUrl
+            ? <img src={gravatarUrl} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
             : (name || currentUser?.username || '?')[0].toUpperCase()}
         </div>
         <div>
           <div style={{ fontSize: 13, fontWeight: 600, color: C.text, marginBottom: 4 }}>Profile picture</div>
-          <div style={{ fontSize: 12, color: C.muted }}>Avatar upload — coming soon</div>
+          <div style={{ fontSize: 12, color: C.muted }}>Served by <a href="https://gravatar.com" target="_blank" rel="noreferrer" style={{ color: C.blue, textDecoration: 'none' }}>Gravatar</a> — set your avatar there</div>
         </div>
       </div>
 

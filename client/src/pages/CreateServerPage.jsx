@@ -5,9 +5,9 @@ const ENGINE_OPTIONS = [
   { id: 'vanilla', label: 'Vanilla', desc: 'Official Mojang server', logo: 'https://github.com/Mojang.png', color: '#3fb950' },
   { id: 'paper', label: 'Paper', desc: 'High-performance fork', logo: 'https://github.com/PaperMC.png', color: '#388bfd' },
   { id: 'fabric', label: 'Fabric', desc: 'Lightweight mod loader', logo: 'https://github.com/FabricMC.png', color: '#d29922' },
-  { id: 'forge', label: 'Forge', desc: 'Popular mod platform', logo: 'https://github.com/MinecraftForge.png', color: '#f0883e' },
-  { id: 'spigot', label: 'Spigot', desc: 'Bukkit-compatible plugins', logo: 'https://github.com/SpigotMC.png', color: '#bc8cff' },
   { id: 'purpur', label: 'Purpur', desc: 'Fork of Paper with extras', logo: 'https://github.com/PurpurMC.png', color: '#f778ba' },
+  { id: 'forge', label: 'Forge', desc: 'Popular mod platform', logo: 'https://github.com/MinecraftForge.png', color: '#f0883e', manualOnly: true },
+  { id: 'spigot', label: 'Spigot', desc: 'Bukkit-compatible plugins', logo: 'https://github.com/SpigotMC.png', color: '#bc8cff', manualOnly: true },
 ]
 
 const MC_VERSIONS = [
@@ -49,12 +49,14 @@ export default function CreateServerPage({ onCreated, onCancel }) {
     setProgress(0)
     setError(null)
 
+    // Animate through the first two steps quickly, then hold at "Downloading…"
+    // while the actual network request (which includes the JAR download) runs.
     const interval = setInterval(() => {
       setProgress(p => {
-        if (p >= 4) { clearInterval(interval); return 4 }
+        if (p >= 2) { clearInterval(interval); return 2 }
         return p + 1
       })
-    }, 800)
+    }, 900)
 
     try {
       const res = await apiFetch('/servers', {
@@ -73,7 +75,7 @@ export default function CreateServerPage({ onCreated, onCancel }) {
         }),
       })
       clearInterval(interval)
-      setProgress(4)
+      setProgress(5)
       setTimeout(() => onCreated && onCreated(res), 600)
     } catch (err) {
       clearInterval(interval)
@@ -160,10 +162,14 @@ function StepEngine({ engine, setEngine }) {
             background: engine === opt.id ? `${opt.color}18` : C.surface2,
             border: `2px solid ${engine === opt.id ? opt.color : C.border}`,
             transition: 'border-color 150ms, background 150ms', textAlign: 'left',
+            position: 'relative',
           }}>
             <img src={opt.logo} alt={opt.label} style={{ width: 36, height: 36, borderRadius: 6, objectFit: 'contain' }} />
             <div style={{ fontSize: 14, fontWeight: 600, color: C.text }}>{opt.label}</div>
             <div style={{ fontSize: 11, color: C.muted, lineHeight: 1.4 }}>{opt.desc}</div>
+            {opt.manualOnly && (
+              <div style={{ fontSize: 10, color: C.amber, fontWeight: 600, marginTop: 2 }}>Manual JAR required</div>
+            )}
           </button>
         ))}
       </div>
@@ -325,8 +331,8 @@ function StepReview({ engine, version, settings }) {
           </div>
         ))}
       </div>
-      <div style={{ marginTop: 16, padding: '12px 16px', background: `${C.amber}10`, border: `1px solid ${C.amber}44`, borderRadius: 8, fontSize: 12, color: C.amber, lineHeight: 1.5 }}>
-        You'll need to place <code style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 11 }}>server.jar</code> in the server directory before starting. The EULA is accepted automatically.
+      <div style={{ marginTop: 16, padding: '12px 16px', background: `${C.green}10`, border: `1px solid ${C.green}44`, borderRadius: 8, fontSize: 12, color: C.green, lineHeight: 1.5 }}>
+        The server JAR will be downloaded automatically. The EULA is accepted on your behalf.
       </div>
     </div>
   )
@@ -335,9 +341,10 @@ function StepReview({ engine, version, settings }) {
 const CREATE_STEPS = [
   'Validating configuration…',
   'Creating server directory…',
+  'Downloading server.jar…',
   'Writing server.properties…',
   'Accepting EULA…',
-  'Server created successfully!',
+  'Server created!',
 ]
 
 function CreatingAnimation({ progress, name }) {
@@ -348,7 +355,7 @@ function CreatingAnimation({ progress, name }) {
       <div style={{ width: '100%', background: C.surface2, borderRadius: 4, height: 4, overflow: 'hidden' }}>
         <div style={{
           height: '100%', borderRadius: 4, background: C.green,
-          width: `${(progress / 4) * 100}%`,
+          width: `${(progress / 5) * 100}%`,
           transition: 'width 600ms ease',
         }} />
       </div>

@@ -42,6 +42,35 @@ export function formatRelTime(ts) {
   return `${Math.floor(diff / 86400)}d ago`
 }
 
+export function useGravatar(email, size = 80) {
+  const [url, setUrl] = useState(null)
+  useEffect(() => {
+    // Only compute once the user has typed a plausible email address.
+    if (!email || !email.includes('@')) { setUrl(null); return }
+
+    let cancelled = false
+
+    if (!crypto?.subtle) {
+      // Non-HTTPS / non-localhost context — crypto.subtle unavailable, skip silently.
+      return
+    }
+
+    const encoded = new TextEncoder().encode(email.trim().toLowerCase())
+    crypto.subtle.digest('SHA-256', encoded)
+      .then(buf => {
+        if (cancelled) return
+        const hash = Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('')
+        setUrl(`https://gravatar.com/avatar/${hash}?s=${size}&d=identicon`)
+      })
+      .catch(() => { if (!cancelled) setUrl(null) })
+
+    // Cancel the in-flight promise result when email changes or component unmounts,
+    // so rapid typing never applies a stale hash from an earlier keystroke.
+    return () => { cancelled = true }
+  }, [email, size])
+  return url
+}
+
 export function apiUrl(path) {
   if (!path) return path
   if (path.startsWith('http://') || path.startsWith('https://')) return path

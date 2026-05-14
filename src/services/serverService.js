@@ -16,8 +16,9 @@ const { spawn } = require('child_process');
 const { EventEmitter } = require('events');
 const { v4: uuidv4 } = require('uuid');
 
-const serverModel = require('../models/serverModel');
-const fileManager = require('../utils/fileManager');
+const serverModel    = require('../models/serverModel');
+const fileManager    = require('../utils/fileManager');
+const jarDownloader  = require('../utils/jarDownloader');
 const { badRequest, notFound, conflict, internal } = require('../utils/errors');
 const logPersist = require('../utils/logPersist');
 const observability = require('../utils/observability');
@@ -185,11 +186,11 @@ function validateRam(ram) {
 // ---------------------------------------------------------------------------
 
 /**
- * Create a new server: validate → check conflicts → create files → save to DB.
- * @param {{ name: string, port: number|string, ram: string }} params
- * @returns {object} The created server record
+ * Create a new server: validate → check conflicts → create files → download JAR → save to DB.
+ * @param {{ name, port, ram, engine, version, maxPlayers, motd, gamemode, pvp, onlineMode }} params
+ * @returns {Promise<object>} The created server record
  */
-function createServer({ name, port, ram = '1G', maxPlayers, motd, gamemode, pvp, onlineMode }) {
+async function createServer({ name, port, ram = '1G', engine, version, maxPlayers, motd, gamemode, pvp, onlineMode }) {
   // 1. Validate inputs first — no side effects yet
   validateName(name);
   const validPort = validatePort(port);
@@ -205,19 +206,28 @@ function createServer({ name, port, ram = '1G', maxPlayers, motd, gamemode, pvp,
 
   const serverPath = path.join(SERVERS_ROOT, name);
 
-  // 3. Disk operations — do these before writing to DB so we don't end up
-  //    with a DB record for a server whose directory creation failed
+  // 3. Disk operations — do these before writing to DB so a failure leaves no DB record
   try {
     fileManager.createServerDirectory(serverPath);
     fileManager.writeEula(serverPath);
     fileManager.writeServerProperties(serverPath, { port: validPort, name, maxPlayers, motd, gamemode, pvp, onlineMode });
   } catch (err) {
-    // Best-effort cleanup: the directory might be partially created
-    // We don't try to delete it — leave it for the user to inspect
     throw internal(`Failed to create server directory: ${err.message}`);
   }
 
-  // 4. Persist to DB
+  // 4. Download server.jar — runs before the DB record is created so that a failed
+  //    download cleans up and never leaves an un-launchable server in the list.
+  if (engine && version) {
+    try {
+      await jarDownloader.downloadServerJar(serverPath, engine, version);
+    } catch (err) {
+      // Best-effort cleanup: remove the directory we just created
+      try { await fsp.rm(serverPath, { recursive: true, force: true }); } catch {}
+      throw internal(`Failed to download server JAR: ${err.message}`);
+    }
+  }
+
+  // 5. Persist to DB — only reached after all disk operations succeed
   const server = serverModel.create({
     id: uuidv4(),
     name,

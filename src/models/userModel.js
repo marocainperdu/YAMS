@@ -21,7 +21,7 @@ function getStmts() {
         `SELECT COUNT(*) AS n FROM users`
       ),
       findAll: db.prepare(
-        `SELECT id, username, role, created_at FROM users ORDER BY created_at ASC`
+        `SELECT id, username, role, email, created_at FROM users ORDER BY created_at ASC`
       ),
       updateRole: db.prepare(
         `UPDATE users SET role = ? WHERE id = ?`
