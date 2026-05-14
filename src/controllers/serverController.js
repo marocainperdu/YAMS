@@ -82,4 +82,20 @@ async function remove(req, res, next) {
   }
 }
 
-module.exports = { create, list, getOne, start, stop, remove };
+/**
+ * POST /servers/reorder
+ * Body: { order: [id1, id2, ...] }
+ */
+function reorder(req, res, next) {
+  try {
+    const { order } = req.body;
+    if (!Array.isArray(order) || order.length === 0)
+      return next(require('../utils/errors').badRequest('order must be a non-empty array of server IDs'));
+    require('../models/serverModel').reorder(order);
+    res.status(204).end();
+  } catch (err) {
+    next(err);
+  }
+}
+
+module.exports = { create, list, getOne, start, stop, remove, reorder };

@@ -23,7 +23,10 @@ function getStmts() {
          VALUES (?, ?, ?, ?, ?)`
       ),
       findAll: db.prepare(
-        `SELECT * FROM servers ORDER BY created_at DESC`
+        `SELECT * FROM servers ORDER BY priority ASC, created_at ASC`
+      ),
+      updatePriority: db.prepare(
+        `UPDATE servers SET priority = ?, updated_at = datetime('now') WHERE id = ?`
       ),
       findById: db.prepare(
         `SELECT * FROM servers WHERE id = ?`
@@ -106,4 +109,12 @@ function remove(id) {
   getStmts().remove.run(id);
 }
 
-module.exports = { create, findAll, findById, findByPort, findByName, updateStatus, remove };
+function reorder(orderedIds) {
+  const db   = getDb();
+  const stmt = getStmts().updatePriority;
+  db.transaction((ids) => {
+    ids.forEach((id, index) => stmt.run(index, id));
+  })(orderedIds);
+}
+
+module.exports = { create, findAll, findById, findByPort, findByName, updateStatus, remove, reorder };

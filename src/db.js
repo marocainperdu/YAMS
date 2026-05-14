@@ -55,9 +55,15 @@ function migrate(db) {
 
   `);
 
-  // Idempotent column addition for DBs created before token_version existed.
+  // Idempotent column additions for DBs created before these columns existed.
   try {
     db.exec(`ALTER TABLE users ADD COLUMN token_version INTEGER NOT NULL DEFAULT 0`);
+  } catch (e) {
+    if (!e.message.includes('duplicate column')) throw e;
+  }
+
+  try {
+    db.exec(`ALTER TABLE servers ADD COLUMN priority INTEGER NOT NULL DEFAULT 0`);
   } catch (e) {
     if (!e.message.includes('duplicate column')) throw e;
   }

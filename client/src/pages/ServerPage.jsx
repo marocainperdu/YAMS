@@ -941,35 +941,58 @@ function TabScheduler({ serverId }) {
   );
 }
 
-// ─── TabReorder (static, cosmetic) ────────────────────────────────────────────
-function TabReorder({ serverId }) {
-  const [servers, setServers] = React.useState(null);
-  const [drag, setDrag]       = React.useState(null);
-  const [over, setOver]       = React.useState(null);
+// ─── TabReorder ───────────────────────────────────────────────────────────────
+function TabReorder() {
+  const [servers,  setServers]  = React.useState(null);
+  const [drag,     setDrag]     = React.useState(null);
+  const [over,     setOver]     = React.useState(null);
+  const [saveState, setSaveState] = React.useState('idle'); // 'idle' | 'saving' | 'saved' | 'error'
 
   React.useEffect(() => {
-    apiFetch('/metrics')
-      .then(res => {
-        const list = (res.servers?.list || []).map((s, i) => ({ ...s, priority: i + 1 }));
-        setServers(list);
-      })
+    apiFetch('/servers')
+      .then(res => setServers((res.data || []).map((s, i) => ({ ...s, priority: i + 1 }))))
       .catch(() => setServers([]));
   }, []);
 
-  function handleDrop(idx) {
-    if (drag === null || drag === idx) return;
+  async function handleDrop(idx) {
+    if (drag === null || drag === idx) { setDrag(null); setOver(null); return; }
     const reordered = [...servers];
     const [moved] = reordered.splice(drag, 1);
     reordered.splice(idx, 0, moved);
-    setServers(reordered.map((s, i) => ({ ...s, priority: i + 1 })));
+    const withPriority = reordered.map((s, i) => ({ ...s, priority: i + 1 }));
+    setServers(withPriority);
     setDrag(null); setOver(null);
+
+    setSaveState('saving');
+    try {
+      await apiFetch('/servers/reorder', {
+        method: 'POST',
+        body: JSON.stringify({ order: withPriority.map(s => s.id) }),
+      });
+      setSaveState('saved');
+      setTimeout(() => setSaveState('idle'), 2000);
+    } catch {
+      setSaveState('error');
+      setTimeout(() => setSaveState('idle'), 3000);
+    }
   }
 
   if (!servers) return <EmptyState message="Loading…" />;
 
+  const saveColors = { saving: C.muted, saved: C.green, error: C.red };
+  const saveLabels = { saving: 'Saving…', saved: 'Saved', error: 'Failed to save' };
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-      <div style={{ fontSize: 13, color: C.muted }}>Drag servers to set startup and proxy display order.</div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <span style={{ fontSize: 13, color: C.muted }}>Drag to set the display and startup order. Changes are saved automatically.</span>
+        <div style={{ flex: 1 }} />
+        {saveState !== 'idle' && (
+          <span style={{ fontSize: 12, color: saveColors[saveState], transition: 'color 200ms' }}>
+            {saveLabels[saveState]}
+          </span>
+        )}
+      </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
         {servers.map((s, i) => (
           <div
@@ -991,7 +1014,7 @@ function TabReorder({ serverId }) {
             <span style={{ width: 22, height: 22, borderRadius: 4, background: C.surface2, border: `1px solid ${C.border}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, color: C.muted }}>
               {s.priority}
             </span>
-            <span style={{ fontSize: 13, fontWeight: 500, color: C.text }}>{s.name}</span>
+            <span style={{ fontSize: 13, fontWeight: 500, color: C.text, flex: 1 }}>{s.name}</span>
             <StatusDot status={s.status} />
           </div>
         ))}

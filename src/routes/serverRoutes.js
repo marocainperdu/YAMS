@@ -11,8 +11,9 @@ const router = Router();
 router.use(authMiddleware);
 
 // Collection
-router.post('/',  requireServerPermission('control'), controller.create);   // POST /servers
-router.get('/',   requireServerPermission('read'),    controller.list);     // GET  /servers
+router.post('/',         requireServerPermission('control'), controller.create);   // POST /servers
+router.get('/',          requireServerPermission('read'),    controller.list);     // GET  /servers
+router.post('/reorder',  requireServerPermission('control'), controller.reorder);  // POST /servers/reorder
 
 // Single resource
 router.get('/:id',        requireServerPermission('read'),    controller.getOne);  // GET    /servers/:id
