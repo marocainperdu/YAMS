@@ -193,32 +193,30 @@ async function _readLevelName(serverPath) {
 async function _getDiskMetrics(serverId, serverPath) {
   const cached = diskCache.get(serverId);
   if (cached && Date.now() - cached.updatedAt < DISK_CACHE_TTL_MS) {
-    return { serverFolderMb: cached.serverFolderMb, backupsMb: cached.backupsMb, worldsMb: cached.worldsMb };
+    return { root: cached.root, backups: cached.backups, worlds: cached.worlds };
   }
-
-  const toMb = (bytes) => Math.round(bytes / 1024 / 1024 * 10) / 10;
 
   const [totalBytes, backupBytes] = await Promise.all([
     _calcDirSize(serverPath),
     _calcDirSize(path.join(serverPath, 'backups')),
   ]);
 
-  let worldsBytes = 0;
+  let worlds = {};
   try {
     const levelName = await _readLevelName(serverPath);
     const worldDirs = [levelName, `${levelName}_nether`, `${levelName}_the_end`];
     const sizes = await Promise.all(worldDirs.map(d => _calcDirSize(path.join(serverPath, d))));
-    worldsBytes = sizes.reduce((a, b) => a + b, 0);
+    worldDirs.forEach((d, i) => { if (sizes[i] > 0) worlds[d] = sizes[i]; });
   } catch { /* non-critical */ }
 
   const result = {
-    serverFolderMb: toMb(totalBytes),
-    backupsMb:      toMb(backupBytes),
-    worldsMb:       toMb(worldsBytes),
-    updatedAt:      Date.now(),
+    root:      totalBytes,
+    backups:   backupBytes,
+    worlds,
+    updatedAt: Date.now(),
   };
   diskCache.set(serverId, result);
-  return { serverFolderMb: result.serverFolderMb, backupsMb: result.backupsMb, worldsMb: result.worldsMb };
+  return { root: result.root, backups: result.backups, worlds: result.worlds };
 }
 
 // ─── TPS injection ─────────────────────────────────────────────────────────────

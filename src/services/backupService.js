@@ -119,12 +119,12 @@ async function findBackup(serverPathOrId, backupId) {
 
 // ─── createBackup ─────────────────────────────────────────────────────────────
 
-async function createBackup(serverId, serverPathOrId) {
+async function createBackup(serverId, serverPathOrId, { force = false } = {}) {
   const serverRoot = resolveServerRoot(serverPathOrId || serverId);
 
   const serverModel = require('../models/serverModel');
   const server = serverModel.findById(serverId);
-  if (server?.status === 'running') {
+  if (!force && server?.status === 'running') {
     throw conflict('Stop the server before creating a backup', 'SERVER_RUNNING');
   }
 

@@ -134,4 +134,13 @@ async function cancelInstall(req, res, next) {
   }
 }
 
-module.exports = { create, list, getOne, start, stop, remove, reorder, cancelInstall, updateSettings };
+async function getLogs(req, res, next) {
+  try {
+    const logs = serverService.getServerLogs(req.params.id);
+    res.json({ data: logs });
+  } catch (err) {
+    next(err);
+  }
+}
+
+module.exports = { create, list, getOne, getLogs, start, stop, remove, reorder, cancelInstall, updateSettings };

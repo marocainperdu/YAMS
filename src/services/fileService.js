@@ -42,8 +42,8 @@ const DEFAULT_MIME = 'application/octet-stream';
 
 // ─── Path Security ───────────────────────────────────────────────────────────
 
-function resolveSafePath(serverId, userPath = '') {
-  const serverRoot = path.resolve(SERVERS_ROOT, serverId);
+function resolveSafePath(serverRootPath, userPath = '') {
+  const serverRoot = path.resolve(serverRootPath);
   const resolved   = path.resolve(serverRoot, userPath);
 
   if (resolved !== serverRoot && !resolved.startsWith(serverRoot + path.sep)) {
@@ -83,8 +83,8 @@ async function rejectSymlinkDeep(resolvedPath, rootPath) {
 
 // ─── listDirectory ───────────────────────────────────────────────────────────
 
-async function listDirectory(serverId, dirPath = '') {
-  const { resolved } = resolveSafePath(serverId, dirPath);
+async function listDirectory(serverRootPath, dirPath = '') {
+  const { resolved } = resolveSafePath(serverRootPath, dirPath);
 
   let entries;
   try {
@@ -119,8 +119,8 @@ async function listDirectory(serverId, dirPath = '') {
 
 // ─── downloadFile ─────────────────────────────────────────────────────────────
 
-async function downloadFile(serverId, filePath) {
-  const { resolved } = resolveSafePath(serverId, filePath);
+async function downloadFile(serverRootPath, filePath) {
+  const { resolved } = resolveSafePath(serverRootPath, filePath);
   const stat = await rejectSymlink(resolved);
 
   if (stat.isDirectory()) throw badRequest('Cannot download a directory');
@@ -135,8 +135,8 @@ async function downloadFile(serverId, filePath) {
 
 // ─── uploadFile ───────────────────────────────────────────────────────────────
 
-async function uploadFile(serverId, destDir, req, overwrite) {
-  const { resolved: destResolved, serverRoot } = resolveSafePath(serverId, destDir);
+async function uploadFile(serverRootPath, destDir, req, overwrite) {
+  const { resolved: destResolved, serverRoot } = resolveSafePath(serverRootPath, destDir);
   await rejectSymlinkDeep(destResolved, serverRoot);
 
   return new Promise((resolve, reject) => {
@@ -180,7 +180,7 @@ async function uploadFile(serverId, destDir, req, overwrite) {
           return safeReject(badRequest(`Uploading ${ext} files is not allowed`, 'FORBIDDEN_FILE_TYPE'));
         }
 
-        const { resolved: fp } = resolveSafePath(serverId, path.join(destDir, filename));
+        const { resolved: fp } = resolveSafePath(serverRootPath, path.join(destDir, filename));
         finalPath = fp;
         tmpPath   = finalPath + '.yams_tmp';
 
@@ -251,17 +251,17 @@ async function uploadFile(serverId, destDir, req, overwrite) {
 
 // ─── createFolder ─────────────────────────────────────────────────────────────
 
-async function createFolder(serverId, dirPath) {
-  const { resolved, serverRoot } = resolveSafePath(serverId, dirPath);
+async function createFolder(serverRootPath, dirPath) {
+  const { resolved, serverRoot } = resolveSafePath(serverRootPath, dirPath);
   await rejectSymlinkDeep(resolved, serverRoot);
   await fsp.mkdir(resolved, { recursive: true });
 }
 
 // ─── renameFile ───────────────────────────────────────────────────────────────
 
-async function renameFile(serverId, fromPath, toPath) {
-  const { resolved: from, serverRoot } = resolveSafePath(serverId, fromPath);
-  const { resolved: to }               = resolveSafePath(serverId, toPath);
+async function renameFile(serverRootPath, fromPath, toPath) {
+  const { resolved: from, serverRoot } = resolveSafePath(serverRootPath, fromPath);
+  const { resolved: to }               = resolveSafePath(serverRootPath, toPath);
 
   if (from === serverRoot) throw forbidden('Cannot rename the server root directory');
 
@@ -310,8 +310,8 @@ async function renameFile(serverId, fromPath, toPath) {
 
 // ─── deleteFile ───────────────────────────────────────────────────────────────
 
-async function deleteFile(serverId, filePath) {
-  const { resolved, serverRoot } = resolveSafePath(serverId, filePath);
+async function deleteFile(serverRootPath, filePath) {
+  const { resolved, serverRoot } = resolveSafePath(serverRootPath, filePath);
 
   if (resolved === serverRoot) throw forbidden('Cannot delete the server root directory');
 
@@ -324,6 +324,25 @@ async function deleteFile(serverId, filePath) {
   }
 }
 
+const TEXT_EDIT_LIMIT = 1 * 1024 * 1024; // 1 MB — anything bigger is not fit for inline editing
+
+async function readFileContent(serverRootPath, filePath) {
+  const { resolved } = resolveSafePath(serverRootPath, filePath);
+  const stat = await rejectSymlink(resolved);
+  if (stat.isDirectory()) throw badRequest('Cannot read a directory as text');
+  if (stat.size > TEXT_EDIT_LIMIT) throw badRequest('File exceeds the 1 MB inline-edit limit');
+  const content = await fsp.readFile(resolved, 'utf8');
+  return { content, size: stat.size };
+}
+
+async function writeFileContent(serverRootPath, filePath, content) {
+  const { resolved, serverRoot } = resolveSafePath(serverRootPath, filePath);
+  await rejectSymlinkDeep(resolved, serverRoot);
+  const tmp = resolved + '.yams_edit_tmp';
+  await fsp.writeFile(tmp, content, 'utf8');
+  await fsp.rename(tmp, resolved);
+}
+
 module.exports = {
   listDirectory,
   downloadFile,
@@ -331,6 +350,8 @@ module.exports = {
   createFolder,
   renameFile,
   deleteFile,
+  readFileContent,
+  writeFileContent,
   FILE_UPLOAD_LIMIT,
   FILE_LIST_LIMIT,
 };

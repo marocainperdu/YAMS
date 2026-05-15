@@ -56,7 +56,7 @@ function isCancelled(serverId) {
  * Re-implements the minimal downloader here so modpackService has no
  * dependency on jarDownloader's internal helpers.
  */
-function downloadFileTo(url, destPath) {
+function downloadFileTo(url, destPath, onProgress) {
   return new Promise((resolve, reject) => {
     const httpsMod = require('https');
     const httpMod  = require('http');
@@ -64,13 +64,14 @@ function downloadFileTo(url, destPath) {
     get(url, { headers: { 'User-Agent': 'YAMS/1.0' } }, res => {
       if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
         res.resume();
-        return downloadFileTo(res.headers.location, destPath).then(resolve, reject);
+        return downloadFileTo(res.headers.location, destPath, onProgress).then(resolve, reject);
       }
       if (res.statusCode !== 200) {
         res.resume();
         return reject(new Error(`HTTP ${res.statusCode} downloading ${url}`));
       }
       const file = createWriteStream(destPath);
+      if (onProgress) res.on('data', chunk => onProgress(chunk.length));
       res.pipe(file);
       file.on('finish', () => file.close(resolve));
       file.on('error', err => { fs.unlink(destPath, () => {}); reject(err); });
@@ -172,12 +173,19 @@ function parseModrinthManifest(manifest) {
     break;
   }
 
-  const files = (manifest.files ?? []).map(f => ({
-    path: f.path,
-    url: (f.downloads ?? [])[0] ?? null,
-  })).filter(f => f.url);
+  const allFiles = manifest.files ?? [];
 
-  return { mcVersion, loader, loaderVersion, files };
+  // Mods marked server: 'unsupported' are client-only — skip them on the server
+  const skippedClientMods = allFiles
+    .filter(f => f.env?.server === 'unsupported')
+    .map(f => ({ name: path.basename(f.path), reason: 'client_only' }));
+
+  const files = allFiles
+    .filter(f => f.env?.server !== 'unsupported')
+    .map(f => ({ path: f.path, url: (f.downloads ?? [])[0] ?? null }))
+    .filter(f => f.url);
+
+  return { mcVersion, loader, loaderVersion, files, skippedClientMods };
 }
 
 /**
@@ -295,6 +303,12 @@ async function installPack(server, packInfo) {
     const skippedMods = [];
 
     if (platform === 'modrinth') {
+      // Merge client-only mods (filtered out by parseModrinthManifest) into skipped list
+      if (descriptor.skippedClientMods?.length) {
+        skippedMods.push(...descriptor.skippedClientMods);
+        console.log(`[modpack] Skipping ${descriptor.skippedClientMods.length} client-only mod(s):`,
+          descriptor.skippedClientMods.map(m => m.name).join(', '));
+      }
       modFiles = descriptor.files.map(f => ({
         destRelPath: f.path,
         url: f.url,
@@ -309,9 +323,22 @@ async function installPack(server, packInfo) {
       modFiles = [];
       for (const { fileId, projectId } of descriptor.files) {
         const info = urlMap.get(fileId);
+
+        // Client-only: gameVersions has 'Client' but not 'Server'
+        const gv = info?.gameVersions ?? [];
+        if (gv.includes('Client') && !gv.includes('Server')) {
+          skippedMods.push({
+            name:   info?.fileName ?? info?.displayName ?? `project ${projectId}`,
+            reason: 'client_only',
+          });
+          console.log(`[modpack] Skipping client-only mod: ${info?.fileName ?? projectId}`);
+          continue;
+        }
+
         if (!info?.downloadUrl) {
           skippedMods.push({
             name:      info?.fileName ?? info?.displayName ?? `project ${projectId}`,
+            reason:    'distribution_restricted',
             projectId,
             fileId,
           });
@@ -325,17 +352,44 @@ async function installPack(server, packInfo) {
       }
     }
 
+    // ── Step 6b: Resolve exact download page URLs for restricted mods ─────────
+    const restrictedMods = skippedMods.filter(m => m.reason === 'distribution_restricted');
+    if (restrictedMods.length > 0 && platform === 'curseforge') {
+      try {
+        const pageUrlMap = await curseforge.getModPageUrls(restrictedMods.map(m => m.projectId));
+        for (const mod of restrictedMods) {
+          const base = pageUrlMap.get(mod.projectId);
+          mod.pageUrl = base ? `${base}/download/${mod.fileId}` : null;
+        }
+      } catch {
+        // Non-fatal — frontend falls back gracefully if pageUrl is null
+      }
+    }
+
     // ── Step 7: Download mods with concurrency limit ──────────────────────────
     const total = modFiles.length;
     let current = 0;
+    let totalBytes = 0;
+    let lastProgressEmit = 0;
+
+    const emitProgress = (name) => {
+      emit(id, { type: 'install_progress', step: 'downloading_mods', current, total, name, totalBytes });
+    };
 
     const tasks = modFiles.map(mod => async () => {
       if (isCancelled(id)) return;
       const destPath = path.join(serverPath, mod.destRelPath);
       await fsp.mkdir(path.dirname(destPath), { recursive: true });
-      await downloadFileTo(mod.url, destPath);
+      await downloadFileTo(mod.url, destPath, bytes => {
+        totalBytes += bytes;
+        const now = Date.now();
+        if (now - lastProgressEmit >= 100) {
+          lastProgressEmit = now;
+          emitProgress(mod.name);
+        }
+      });
       current++;
-      emit(id, { type: 'install_progress', step: 'downloading_mods', current, total, name: mod.name });
+      emitProgress(mod.name);
     });
 
     if (isCancelled(id)) return await doCancel(id, server, tmpZip, tmpPackDir);

@@ -12,11 +12,31 @@
 
 const path = require('path');
 const fsp  = require('fs/promises');
+const fs   = require('fs');
 const { spawn } = require('child_process');
 const { EventEmitter } = require('events');
 const { v4: uuidv4 } = require('uuid');
 
+// ── Java binary selection ─────────────────────────────────────────────────────
+const JAVA_PATHS = {
+  '8':    ['/usr/lib/jvm/java-8-openjdk/bin/java',  '/usr/lib/jvm/java-1.8-openjdk/bin/java'],
+  '11':   ['/usr/lib/jvm/java-11-openjdk/bin/java'],
+  '17':   ['/usr/lib/jvm/java-17-openjdk/bin/java'],
+  '21':   ['/usr/lib/jvm/java-21-openjdk/bin/java'],
+  '25':   ['/usr/lib/jvm/java-25-openjdk/bin/java', '/usr/local/bin/java'],
+  'auto': ['/usr/local/bin/java', '/usr/lib/jvm/java-25-openjdk/bin/java', '/usr/lib/jvm/java-21-openjdk/bin/java'],
+};
+
+function pickJavaBinary(javaVersion = 'auto') {
+  const candidates = JAVA_PATHS[javaVersion] ?? JAVA_PATHS['auto'];
+  for (const p of candidates) {
+    if (fs.existsSync(p)) return p;
+  }
+  return 'java';
+}
+
 const serverModel    = require('../models/serverModel');
+const scheduleModel  = require('../models/scheduleModel');
 const fileManager    = require('../utils/fileManager');
 const jarDownloader  = require('../utils/jarDownloader');
 const { badRequest, notFound, conflict, internal } = require('../utils/errors');
@@ -287,6 +307,16 @@ async function createServer({ name, port, ram = '1G', engine, version, maxPlayer
       port: validPort,
       ram:  validRam,
     });
+    // Seed a disabled daily-backup template task so users have a working example.
+    scheduleModel.create({
+      id:       uuidv4(),
+      serverId: server.id,
+      name:     'Daily Backup',
+      type:     'backup',
+      cron:     '0 4 * * *',
+      command:  '',
+      enabled:  false,
+    });
     console.log(`[YAMS] Created server '${name}' at ${serverPath}`);
   }
 
@@ -353,12 +383,13 @@ function startServer(id) {
   }
 
   // Build launch command: NeoForge uses run.sh, everything else uses java -jar server.jar
+  const javaBin = pickJavaBinary(server.java_version);
   let spawnCmd, spawnArgs;
   if (isRunScript) {
     spawnCmd = 'sh';
     spawnArgs = ['run.sh', '--nogui'];
   } else {
-    spawnCmd = 'java';
+    spawnCmd = javaBin;
     spawnArgs = [`-Xms${server.ram}`, `-Xmx${server.ram}`, '-jar', 'server.jar', '--nogui'];
   }
 
@@ -403,17 +434,25 @@ function startServer(id) {
 
   // stdout: pipe to YAMS process stdout for local visibility, and push to the
   // ring buffer + broadcast to all subscribed WS clients via pushLog.
+  // Split chunks into individual lines — data events can deliver multiple
+  // newline-separated lines at once, which would cause blank lines in the UI.
   child.stdout.on('data', (data) => {
-    const line = data.toString();
-    process.stdout.write(`[${server.name}] ${line}`);
-    pushLog(id, 'stdout', line);
+    const chunk = data.toString();
+    process.stdout.write(`[${server.name}] ${chunk}`);
+    chunk.split('\n').forEach(line => {
+      const trimmed = line.replace(/\r$/, '');
+      if (trimmed) pushLog(id, 'stdout', trimmed);
+    });
   });
 
   // stderr: same pipeline, tagged 'stderr' so clients can style or filter it.
   child.stderr.on('data', (data) => {
-    const line = data.toString();
-    process.stderr.write(`[${server.name}] ERROR: ${line}`);
-    pushLog(id, 'stderr', line);
+    const chunk = data.toString();
+    process.stderr.write(`[${server.name}] ERROR: ${chunk}`);
+    chunk.split('\n').forEach(line => {
+      const trimmed = line.replace(/\r$/, '');
+      if (trimmed) pushLog(id, 'stderr', trimmed);
+    });
   });
 
   // Handles both graceful shutdown and unexpected crashes.
@@ -797,13 +836,15 @@ function updateServerSettings(id, fields) {
   if (!server) throw notFound(`Server '${id}' not found`);
   if (processes.has(id)) throw conflict('Stop the server before changing its settings');
 
-  const name       = fields.name       !== undefined ? fields.name       : server.name;
-  const port       = fields.port       !== undefined ? fields.port       : server.port;
-  const ram        = fields.ram        !== undefined ? fields.ram        : server.ram;
+  const name        = fields.name        !== undefined ? fields.name        : server.name;
+  const port        = fields.port        !== undefined ? fields.port        : server.port;
+  const ram         = fields.ram         !== undefined ? fields.ram         : server.ram;
+  const javaVersion = fields.javaVersion !== undefined ? fields.javaVersion : (server.java_version ?? 'auto');
 
   if (fields.name !== undefined) validateName(name);
   const validPort = validatePort(port);
   const validRam  = validateRam(ram);
+  if (!['auto', '8', '11', '17', '21', '25'].includes(javaVersion)) throw badRequest('javaVersion must be "auto", "8", "11", "17", "21", or "25"');
 
   if (fields.port !== undefined && validPort !== server.port) {
     const conflict_ = serverModel.findByPort(validPort);
@@ -814,7 +855,7 @@ function updateServerSettings(id, fields) {
     if (conflict_ && conflict_.id !== id) throw conflict(`A server named '${name}' already exists`);
   }
 
-  serverModel.update(id, { name, port: validPort, ram: validRam });
+  serverModel.update(id, { name, port: validPort, ram: validRam, javaVersion });
 
   const propPatches = {};
   if (fields.port       !== undefined) propPatches['server-port']  = validPort;
@@ -863,12 +904,25 @@ function getChildProcess(serverId) {
   return entry ? entry.child : null;
 }
 
+/**
+ * Return the current in-memory ring buffer for a server.
+ * Used by GET /servers/:id/logs so the console tab can show existing
+ * log lines immediately — before the WebSocket finishes its subscribe handshake.
+ */
+function getServerLogs(id) {
+  const server = serverModel.findById(id);
+  if (!server) throw notFound(`Server '${id}' not found`);
+  const entry = processes.get(id);
+  return entry ? [...entry.logs] : [];
+}
+
 module.exports = {
   createServer, startServer, stopServer, deleteServer, listServers, getServer, updateServerSettings,
   subscribe, unsubscribe, sendCommand,
   cancelInstallServer, broadcastInstallEvent, clearInstallClients,
   getChildProcess,
   streamEmitter,
+  getServerLogs,
   getObservability: observability.getObservability,
   getMetricsSnapshot,
   LOG_BUFFER_SIZE,

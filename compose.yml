@@ -7,7 +7,9 @@ services:
       # YAMS web UI — set YAMS_PORT in your .env to change the host port.
       - "${YAMS_PORT:-3001}:3000"
       # Minecraft server ports — one port per server you plan to run.
-      - "25565-25665:25565-25665"
+      - "25565:25565"
+      - "25566:25566"
+      - "25567:25567"
     volumes:
       - ./data:/app/data         # yams.db + SQLite WAL files
       - ./servers:/app/servers   # server JARs, worlds, configs, backups

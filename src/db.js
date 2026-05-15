@@ -122,6 +122,24 @@ function migrate(db) {
     console.log('[YAMS] Migrated servers table to support modpack installation status');
   }
 
+  try {
+    db.exec(`ALTER TABLE servers ADD COLUMN java_version TEXT NOT NULL DEFAULT 'auto'`);
+  } catch (e) {
+    if (!e.message.includes('duplicate column')) throw e;
+  }
+
+  try {
+    db.exec(`ALTER TABLE schedules ADD COLUMN type TEXT NOT NULL DEFAULT 'command'`);
+  } catch (e) {
+    if (!e.message.includes('duplicate column')) throw e;
+  }
+
+  try {
+    db.exec(`ALTER TABLE schedules ADD COLUMN config TEXT NOT NULL DEFAULT '{}'`);
+  } catch (e) {
+    if (!e.message.includes('duplicate column')) throw e;
+  }
+
   db.exec(`
     CREATE TABLE IF NOT EXISTS refresh_tokens (
       id          TEXT    PRIMARY KEY,
@@ -157,6 +175,25 @@ function migrate(db) {
       created_at  TEXT    NOT NULL DEFAULT (datetime('now'))
     );
   `);
+
+  // Backfill: seed a disabled Daily Backup template for servers that have no backup task yet.
+  const { v4: uuidv4 } = require('uuid');
+  const serversWithoutBackup = db.prepare(`
+    SELECT s.id FROM servers s
+    WHERE NOT EXISTS (
+      SELECT 1 FROM schedules t WHERE t.server_id = s.id AND t.type = 'backup'
+    )
+  `).all();
+  const insertTemplate = db.prepare(
+    `INSERT INTO schedules (id, server_id, name, type, cron, command, enabled)
+     VALUES (?, ?, 'Daily Backup', 'backup', '0 4 * * *', '', 0)`
+  );
+  for (const { id } of serversWithoutBackup) {
+    insertTemplate.run(uuidv4(), id);
+  }
+  if (serversWithoutBackup.length > 0) {
+    console.log(`[YAMS] Seeded Daily Backup template for ${serversWithoutBackup.length} server(s)`);
+  }
 }
 
 module.exports = { getDb };

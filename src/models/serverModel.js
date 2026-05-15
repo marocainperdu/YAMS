@@ -52,7 +52,7 @@ function getStmts() {
          WHERE id = ?`
       ),
       update: db.prepare(
-        `UPDATE servers SET name = ?, port = ?, ram = ?, updated_at = datetime('now') WHERE id = ?`
+        `UPDATE servers SET name = ?, port = ?, ram = ?, java_version = ?, updated_at = datetime('now') WHERE id = ?`
       ),
       remove: db.prepare(
         `DELETE FROM servers WHERE id = ?`
@@ -151,8 +151,8 @@ function remove(id) {
  * @param {{ name: string, port: number, ram: string }} fields
  * @returns {object} Updated server row
  */
-function update(id, { name, port, ram }) {
-  getStmts().update.run(name, port, ram, id);
+function update(id, { name, port, ram, javaVersion }) {
+  getStmts().update.run(name, port, ram, javaVersion ?? 'auto', id);
   return findById(id);
 }
 

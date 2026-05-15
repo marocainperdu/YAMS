@@ -66,6 +66,33 @@ function downloadFile(url, destPath) {
   });
 }
 
+function postJson(apiPath, body) {
+  const bodyStr = JSON.stringify(body);
+  return new Promise((resolve, reject) => {
+    const req = https.request({
+      hostname: 'api.modrinth.com',
+      path:     apiPath,
+      method:   'POST',
+      headers: {
+        'User-Agent':     UA,
+        'Content-Type':   'application/json',
+        'Content-Length': Buffer.byteLength(bodyStr),
+      },
+    }, res => {
+      let raw = '';
+      res.on('data', c => { raw += c; });
+      res.on('end', () => {
+        if (res.statusCode !== 200) return reject(new Error(`Modrinth API ${res.statusCode} at ${apiPath}`));
+        try { resolve(JSON.parse(raw)); }
+        catch { reject(new Error('Failed to parse Modrinth response')); }
+      });
+    });
+    req.on('error', reject);
+    req.write(bodyStr);
+    req.end();
+  });
+}
+
 // ── Public API ──────────────────────────────────────────────────────────────
 
 /**
@@ -114,4 +141,76 @@ async function downloadPackFile(url, destPath) {
   await downloadFile(url, destPath);
 }
 
-module.exports = { searchModpacks, getProjectVersions, downloadPackFile };
+/**
+ * Search Modrinth for individual mods (not modpacks).
+ * @param {string} query
+ * @param {{ loader?: string, gameVersion?: string }} opts
+ * @param {number} limit
+ */
+async function searchMods(query, { loader, gameVersion } = {}, limit = 20) {
+  const facets = [['project_type:mod']];
+  if (loader)      facets.push([`categories:${loader}`]);
+  if (gameVersion) facets.push([`versions:${gameVersion}`]);
+
+  const url = `${BASE}/search?query=${encodeURIComponent(query)}&facets=${encodeURIComponent(JSON.stringify(facets))}&limit=${limit}&index=relevance`;
+  return fetchJson(url);
+}
+
+/**
+ * Get versions for a mod project, optionally filtered by loader and game version.
+ * @param {string} projectId
+ * @param {{ loader?: string, gameVersion?: string }} opts
+ */
+async function getModProjectVersions(projectId, { loader, gameVersion } = {}) {
+  const qs = new URLSearchParams();
+  if (loader)      qs.set('loaders',       JSON.stringify([loader]));
+  if (gameVersion) qs.set('game_versions', JSON.stringify([gameVersion]));
+  const suffix = qs.toString() ? `?${qs}` : '';
+  return fetchJson(`${BASE}/project/${encodeURIComponent(projectId)}/version${suffix}`);
+}
+
+/**
+ * Fetch a single version by ID.
+ * @param {string} versionId
+ */
+async function getVersion(versionId) {
+  return fetchJson(`${BASE}/version/${encodeURIComponent(versionId)}`);
+}
+
+/**
+ * Identify local mod files by their SHA-512 hashes.
+ * Returns a Map<hash, { projectId, title, slug, serverSide, clientSide, versionId, versionNumber }>.
+ * Hashes not found on Modrinth are absent from the Map.
+ * @param {string[]} hashes  SHA-512 hex strings
+ */
+async function identifyMods(hashes) {
+  if (!hashes.length) return new Map();
+
+  // Step 1: resolve hashes → version objects
+  const versionMap = await postJson('/v2/version_files', { hashes, algorithm: 'sha512' });
+
+  const versions = Object.values(versionMap);
+  const projectIds = [...new Set(versions.map(v => v.project_id))];
+  if (!projectIds.length) return new Map();
+
+  // Step 2: fetch project metadata (includes server_side / client_side)
+  const projects = await fetchJson(`${BASE}/projects?ids=${encodeURIComponent(JSON.stringify(projectIds))}`);
+  const projectMap = new Map(projects.map(p => [p.id, p]));
+
+  const result = new Map();
+  for (const [hash, v] of Object.entries(versionMap)) {
+    const p = projectMap.get(v.project_id);
+    result.set(hash, {
+      projectId:     v.project_id,
+      versionId:     v.id,
+      versionNumber: v.version_number,
+      title:         p?.title     ?? null,
+      slug:          p?.slug      ?? null,
+      serverSide:    p?.server_side ?? null,
+      clientSide:    p?.client_side ?? null,
+    });
+  }
+  return result;
+}
+
+module.exports = { searchModpacks, getProjectVersions, downloadPackFile, searchMods, getModProjectVersions, getVersion, identifyMods };

@@ -22,6 +22,7 @@ router.post('/reorder',  requireServerPermission('control'), controller.reorder)
 
 // Single resource
 router.get('/:id',        requireServerPermission('read'),    controller.getOne);         // GET    /servers/:id
+router.get('/:id/logs',   requireServerPermission('read'),    controller.getLogs);         // GET    /servers/:id/logs
 router.patch('/:id/settings', requireServerPermission('control'), controller.updateSettings); // PATCH  /servers/:id/settings
 router.delete('/:id',     requireServerPermission('control'), controller.remove);  // DELETE /servers/:id
 router.post('/:id/start', heavyOpLimiter, requireServerPermission('control'), controller.start);   // POST /servers/:id/start
@@ -37,8 +38,7 @@ router.post('/:id/mods/upload', requireServerPermission('control'), async (req, 
     const server = serverModel.findById(req.params.id);
     if (!server) return next(notFound('Server not found'));
 
-    const SERVERS_ROOT = process.env.YAMS_SERVERS_ROOT || path.join(__dirname, '..', '..', 'servers');
-    const modsDir = path.join(SERVERS_ROOT, server.id, 'mods');
+    const modsDir = path.join(server.path, 'mods');
     await fsp.mkdir(modsDir, { recursive: true });
 
     const bb = busboy({ headers: req.headers, limits: { fileSize: 256 * 1024 * 1024 } });

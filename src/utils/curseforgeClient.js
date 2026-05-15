@@ -140,6 +140,22 @@ async function getFileDownloadUrls(fileIds) {
 }
 
 /**
+ * Batch-fetch mod details and return a map of projectId → websiteUrl.
+ * Used to build exact file download page URLs for distribution-restricted mods.
+ * @param {number[]} projectIds
+ * @returns {Promise<Map<number, string>>}
+ */
+async function getModPageUrls(projectIds) {
+  if (!projectIds.length) return new Map();
+  const result = await cfRequest('POST', '/v1/mods', { modIds: projectIds });
+  const map = new Map();
+  for (const mod of result.data ?? []) {
+    if (mod.links?.websiteUrl) map.set(mod.id, mod.links.websiteUrl);
+  }
+  return map;
+}
+
+/**
  * Download a CurseForge modpack zip file.
  * @param {string} url
  * @param {string} destPath
@@ -153,4 +169,4 @@ function isEnabled() {
   return Boolean(process.env.CURSEFORGE_API_KEY);
 }
 
-module.exports = { searchModpacks, getPackVersions, getFileDownloadUrls, downloadPackFile, isEnabled };
+module.exports = { searchModpacks, getPackVersions, getFileDownloadUrls, getModPageUrls, downloadPackFile, isEnabled };

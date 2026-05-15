@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import { C, statusColor } from '../styles/tokens'
 
 const API_PREFIX = '/api'
@@ -182,3 +182,72 @@ export function EmptyState({ message }) {
     </div>
   )
 }
+
+/**
+ * Number input with custom styled ▲/▼ spinner that matches the YAMS dark theme.
+ * Drop-in replacement for <input type="number"> — same props.
+ */
+export function NumberInput({ value, onChange, min, max, step = 1, placeholder, style, onFocus, onBlur }) {
+  const [focused, setFocused] = React.useState(false)
+  const [hovUp,   setHovUp]   = React.useState(false)
+  const [hovDn,   setHovDn]   = React.useState(false)
+
+  const adjust = (delta) => {
+    const current = value === '' || value == null ? (min ?? 0) : Number(value)
+    if (isNaN(current)) return
+    let next = current + delta
+    if (min != null) next = Math.max(Number(min), next)
+    if (max != null) next = Math.min(Number(max), next)
+    onChange({ target: { value: String(next) } })
+  }
+
+  const border = `1px solid ${focused ? C.blue : C.border}`
+  const btnBase = {
+    flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
+    background: 'none', border: 'none', cursor: 'pointer',
+    color: C.muted, fontSize: 9, lineHeight: 1, padding: 0, userSelect: 'none',
+  }
+
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'stretch',
+      background: C.surface2, border, borderRadius: 7,
+      overflow: 'hidden', transition: 'border-color 150ms',
+      ...(style || {}),
+    }}>
+      <input
+        type="number"
+        value={value}
+        onChange={onChange}
+        placeholder={placeholder}
+        min={min}
+        max={max}
+        step={step}
+        style={{
+          flex: 1, background: 'none', border: 'none',
+          padding: '9px 13px', fontSize: 14, color: C.text,
+          outline: 'none', minWidth: 0, width: '100%',
+        }}
+        onFocus={e => { setFocused(true);  onFocus && onFocus(e) }}
+        onBlur={e  => { setFocused(false); onBlur  && onBlur(e)  }}
+      />
+      <div style={{ display: 'flex', flexDirection: 'column', borderLeft: `1px solid ${C.border}`, width: 22 }}>
+        <button
+          type="button" tabIndex={-1}
+          onClick={() => adjust(step)}
+          onMouseEnter={() => setHovUp(true)}
+          onMouseLeave={() => setHovUp(false)}
+          style={{ ...btnBase, borderBottom: `1px solid ${C.border}`, background: hovUp ? `${C.blue}18` : 'none' }}
+        >▲</button>
+        <button
+          type="button" tabIndex={-1}
+          onClick={() => adjust(-step)}
+          onMouseEnter={() => setHovDn(true)}
+          onMouseLeave={() => setHovDn(false)}
+          style={{ ...btnBase, background: hovDn ? `${C.blue}18` : 'none' }}
+        >▼</button>
+      </div>
+    </div>
+  )
+}
+

@@ -4,7 +4,7 @@ const crypto       = require('crypto');
 const webhookModel = require('../models/webhookModel');
 const serverModel  = require('../models/serverModel');
 
-const VALID_EVENTS = ['server.start', 'server.stop', 'server.crash'];
+const VALID_EVENTS = ['server.start', 'server.stop', 'server.crash', 'server.alert'];
 const TIMEOUT_MS   = 5_000;
 
 async function fire(hook, payload) {
@@ -29,7 +29,7 @@ async function fire(hook, payload) {
   }
 }
 
-function dispatch(serverId, eventName) {
+function dispatch(serverId, eventName, extra = {}, onlyIds = null) {
   let hooks;
   try {
     hooks = webhookModel
@@ -37,6 +37,11 @@ function dispatch(serverId, eventName) {
       .filter(h => h.enabled && h.events.split(',').includes(eventName));
   } catch {
     return;
+  }
+  // If a specific list of IDs is provided, restrict to those
+  if (onlyIds && onlyIds.length > 0) {
+    const idSet = new Set(onlyIds);
+    hooks = hooks.filter(h => idSet.has(h.id));
   }
   if (!hooks.length) return;
 
@@ -46,6 +51,7 @@ function dispatch(serverId, eventName) {
     serverId,
     serverName: server?.name ?? serverId,
     timestamp:  Date.now(),
+    ...extra,
   };
 
   for (const hook of hooks) {

@@ -1,5 +1,5 @@
 import React from 'react'
-import { apiFetch, C } from '../lib/yamsShared'
+import { apiFetch, C, NumberInput } from '../lib/yamsShared'
 import ModpackBrowser from '../components/ModpackBrowser'
 
 const ENGINE_OPTIONS = [
@@ -509,17 +509,11 @@ function ModpackSettings({ settings, setSettings }) {
       <SettingsRow>
         <div>
           <SettingsLabel>Memory (MB)</SettingsLabel>
-          <input type="number" min="512" value={settings.memory} onChange={e => set('memory', e.target.value)}
-            placeholder="e.g. 4096" style={settingsInp}
-            onFocus={e => { e.target.style.borderColor = C.blue }}
-            onBlur={e => { e.target.style.borderColor = C.border }} />
+          <NumberInput min={512} value={settings.memory} onChange={e => set('memory', e.target.value)} placeholder="e.g. 4096" step={512} />
         </div>
         <div>
           <SettingsLabel>Port</SettingsLabel>
-          <input type="number" min="1024" max="65535" value={settings.port} onChange={e => set('port', e.target.value)}
-            style={settingsInp}
-            onFocus={e => { e.target.style.borderColor = C.blue }}
-            onBlur={e => { e.target.style.borderColor = C.border }} />
+          <NumberInput min={1024} max={65535} value={settings.port} onChange={e => set('port', e.target.value)} />
         </div>
       </SettingsRow>
 
@@ -578,16 +572,28 @@ function ModpackReview({ pack, version, settings }) {
 
 // ── Real-time modpack install progress ────────────────────────────────────────
 
+function fmtSpeed(bytesPerSec) {
+  if (bytesPerSec >= 1024 * 1024) return `${(bytesPerSec / 1024 / 1024).toFixed(2)} MB/s`
+  if (bytesPerSec >= 1024)        return `${(bytesPerSec / 1024).toFixed(1)} KB/s`
+  return `${bytesPerSec.toFixed(0)} B/s`
+}
+
 function ModpackInstallProgress({ serverId, serverName, packName, onDone }) {
-  const [step, setStep]       = React.useState('connecting')
-  const [message, setMessage] = React.useState('Connecting…')
-  const [current, setCurrent] = React.useState(0)
-  const [total, setTotal]     = React.useState(0)
-  const [error, setError]     = React.useState(null)
-  const [done, setDone]       = React.useState(false)
-  const [skipped, setSkipped] = React.useState([])   // [{name, projectId, fileId}]
+  const [step, setStep]           = React.useState('connecting')
+  const [message, setMessage]     = React.useState('Connecting…')
+  const [current, setCurrent]     = React.useState(0)
+  const [total, setTotal]         = React.useState(0)
+  const [speed, setSpeed]         = React.useState(null)   // bytes/sec or null
+  const [activeMod, setActiveMod] = React.useState(null)
+  const [modLog, setModLog]       = React.useState([])
+  const [error, setError]         = React.useState(null)
+  const [done, setDone]           = React.useState(false)
+  const [skipped, setSkipped]     = React.useState([])
   const [manualPhase, setManualPhase] = React.useState(false)
-  const wsRef = React.useRef(null)
+  const wsRef      = React.useRef(null)
+  const logRef     = React.useRef(null)
+  // Rolling speed samples: [{time, bytes}] — keep last 5 samples for smoothing
+  const speedBuf   = React.useRef([])
 
   React.useEffect(() => {
     const token = sessionStorage.getItem('yams_token') ?? ''
@@ -607,14 +613,33 @@ function ModpackInstallProgress({ serverId, serverName, packName, onDone }) {
       if (msg.type === 'install_progress') {
         setStep(msg.step)
         if (msg.step === 'downloading_mods') {
-          setCurrent(msg.current ?? 0); setTotal(msg.total ?? 0)
-          setMessage(`Downloading mods (${msg.current}/${msg.total})${msg.name ? ` — ${msg.name}` : ''}`)
+          const n = msg.current ?? 0
+          const t = msg.total ?? 0
+          setCurrent(n); setTotal(t)
+          // Rolling speed calculation from cumulative bytes
+          if (msg.totalBytes != null) {
+            const now = Date.now()
+            const buf = speedBuf.current
+            buf.push({ time: now, bytes: msg.totalBytes })
+            if (buf.length > 6) buf.shift()
+            if (buf.length >= 2) {
+              const oldest = buf[0]
+              const elapsed = (now - oldest.time) / 1000
+              if (elapsed > 0) setSpeed((msg.totalBytes - oldest.bytes) / elapsed)
+            }
+          }
+          if (msg.name) {
+            setActiveMod(msg.name)
+            if (n > 0) setModLog(prev => [...prev, msg.name])
+          }
+          setMessage(null)
         } else {
+          setActiveMod(null); setSpeed(null)
           setMessage(msg.message ?? msg.step)
         }
       }
       if (msg.type === 'install_complete') {
-        setStep('complete'); setMessage('Installation complete!'); setDone(true)
+        setStep('complete'); setActiveMod(null); setSpeed(null); setDone(true)
         setSkipped(msg.skippedMods ?? [])
         ws.close()
       }
@@ -627,6 +652,11 @@ function ModpackInstallProgress({ serverId, serverName, packName, onDone }) {
     return () => ws.close()
   }, [serverId])
 
+  // Auto-scroll log to bottom as new entries arrive
+  React.useEffect(() => {
+    if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight
+  }, [modLog])
+
   async function handleCancel() {
     wsRef.current?.close()
     try { await apiFetch(`/servers/${serverId}/cancel-install`, { method: 'POST' }) } catch {}
@@ -634,30 +664,77 @@ function ModpackInstallProgress({ serverId, serverName, packName, onDone }) {
   }
 
   function openDownloadTabs() {
-    for (const mod of skipped) {
-      window.open(`https://www.curseforge.com/projects/${mod.projectId}`, '_blank')
+    for (const mod of skipped.filter(m => m.reason !== 'client_only')) {
+      const url = mod.pageUrl ?? `https://www.curseforge.com/projects/${mod.projectId}`
+      window.open(url, '_blank')
     }
     setManualPhase(true)
   }
 
   const pct = total > 0 ? Math.round((current / total) * 100) : (done ? 100 : 0)
+  const isDownloadingMods = step === 'downloading_mods'
 
   if (manualPhase) {
-    return <ModUploadZone serverId={serverId} mods={skipped} onDone={onDone} />
+    return <ModUploadZone serverId={serverId} mods={skipped.filter(m => m.reason !== 'client_only')} onDone={onDone} />
   }
 
   return (
-    <div style={{ maxWidth: 520, margin: '0 auto', padding: '60px 24px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 28 }}>
+    <div style={{ maxWidth: 560, margin: '0 auto', padding: '48px 24px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 24 }}>
       <div style={{ fontSize: 15, fontWeight: 700, color: C.text, textAlign: 'center' }}>
         {error ? 'Installation Failed' : done ? 'Installed!' : `Installing ${packName ?? 'modpack'}…`}
       </div>
 
       {!error && (
         <>
-          <div style={{ width: '100%', background: C.surface2, borderRadius: 4, height: 6, overflow: 'hidden' }}>
-            <div style={{ height: '100%', borderRadius: 4, background: done ? C.green : C.blue, width: `${pct}%`, transition: 'width 400ms ease' }} />
+          {/* Progress bar */}
+          <div style={{ width: '100%' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 6 }}>
+              <span style={{ fontSize: 11, color: C.muted }}>
+                {isDownloadingMods ? `Downloading mods` : (message ?? 'Working…')}
+              </span>
+              {isDownloadingMods && total > 0 && (
+                <span style={{ display: 'flex', gap: 10, alignItems: 'baseline', fontVariantNumeric: 'tabular-nums' }}>
+                  {speed != null && (
+                    <span style={{ fontSize: 11, color: C.blue, fontWeight: 600 }}>{fmtSpeed(speed)}</span>
+                  )}
+                  <span style={{ fontSize: 11, color: C.muted }}>
+                    {current} / {total} <span style={{ color: C.dim }}>({pct}%)</span>
+                  </span>
+                </span>
+              )}
+            </div>
+            <div style={{ width: '100%', background: C.surface2, borderRadius: 4, height: 6, overflow: 'hidden' }}>
+              <div style={{ height: '100%', borderRadius: 4, background: done ? C.green : C.blue, width: `${pct}%`, transition: 'width 300ms ease' }} />
+            </div>
           </div>
-          <div style={{ fontSize: 12, color: C.muted, textAlign: 'center', minHeight: 18 }}>{message}</div>
+
+          {/* Mod download log — only shown during mod download phase */}
+          {(isDownloadingMods || modLog.length > 0) && (
+            <div style={{ width: '100%', background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, overflow: 'hidden' }}>
+              {/* Scrollable log of completed mods */}
+              <div
+                ref={logRef}
+                style={{ maxHeight: 180, overflowY: 'auto', padding: '8px 0', display: 'flex', flexDirection: 'column', gap: 1 }}
+              >
+                {modLog.map((name, i) => (
+                  <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '3px 12px' }}>
+                    <span style={{ fontSize: 11, color: C.green, flexShrink: 0 }}>✓</span>
+                    <span style={{ fontSize: 11, color: C.dim, fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name}</span>
+                  </div>
+                ))}
+                {modLog.length === 0 && !activeMod && (
+                  <div style={{ padding: '8px 12px', fontSize: 11, color: C.dim }}>Starting download…</div>
+                )}
+              </div>
+              {/* Currently downloading — pinned at bottom */}
+              {activeMod && (
+                <div style={{ borderTop: `1px solid ${C.border}`, padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 8, background: `${C.blue}0a` }}>
+                  <span style={{ width: 10, height: 10, borderRadius: '50%', border: `2px solid ${C.blue}`, borderTopColor: 'transparent', flexShrink: 0, animation: 'spin 0.8s linear infinite', display: 'inline-block' }} />
+                  <span style={{ fontSize: 11, color: C.blue, fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{activeMod}</span>
+                </div>
+              )}
+            </div>
+          )}
         </>
       )}
 
@@ -667,17 +744,33 @@ function ModpackInstallProgress({ serverId, serverName, packName, onDone }) {
         </div>
       )}
 
-      {done && skipped.length > 0 && (
+      {done && skipped.some(m => m.reason === 'client_only') && (
+        <div style={{ width: '100%', background: `${C.blue}0e`, border: `1px solid ${C.blue}33`, borderRadius: 8, padding: '14px 16px' }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: C.blue, marginBottom: 4 }}>
+            {skipped.filter(m => m.reason === 'client_only').length} client-side mod{skipped.filter(m => m.reason === 'client_only').length > 1 ? 's' : ''} skipped
+          </div>
+          <div style={{ fontSize: 12, color: C.muted, lineHeight: 1.5, marginBottom: 8 }}>
+            These mods are not needed on the server and were not installed.
+          </div>
+          <ul style={{ margin: 0, padding: '0 0 0 16px', maxHeight: 120, overflowY: 'auto' }}>
+            {skipped.filter(m => m.reason === 'client_only').map((m, i) => (
+              <li key={i} style={{ fontSize: 11, fontFamily: 'monospace', color: C.dim, lineHeight: 1.8 }}>{m.name}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {done && skipped.some(m => m.reason !== 'client_only') && (
         <div style={{ width: '100%', background: `${C.amber}12`, border: `1px solid ${C.amber}44`, borderRadius: 8, padding: '16px' }}>
           <div style={{ fontSize: 13, fontWeight: 600, color: C.amber, marginBottom: 6 }}>
-            {skipped.length} mod{skipped.length > 1 ? 's' : ''} need manual installation
+            {skipped.filter(m => m.reason !== 'client_only').length} mod{skipped.filter(m => m.reason !== 'client_only').length > 1 ? 's' : ''} need manual installation
           </div>
           <div style={{ fontSize: 12, color: C.muted, lineHeight: 1.6, marginBottom: 12 }}>
             These mods are distribution-restricted — CurseForge requires you to download them directly.
             Click below to open each mod's page, then drop the downloaded <code>.jar</code> files here.
           </div>
-          <ul style={{ margin: '0 0 14px 0', padding: '0 0 0 16px' }}>
-            {skipped.map((m, i) => (
+          <ul style={{ margin: '0 0 14px 0', padding: '0 0 0 16px', maxHeight: 160, overflowY: 'auto' }}>
+            {skipped.filter(m => m.reason !== 'client_only').map((m, i) => (
               <li key={i} style={{ fontSize: 11, fontFamily: 'monospace', color: C.muted, lineHeight: 1.8 }}>{m.name}</li>
             ))}
           </ul>
@@ -685,19 +778,19 @@ function ModpackInstallProgress({ serverId, serverName, packName, onDone }) {
             width: '100%', padding: '9px 0', borderRadius: 7, border: 'none',
             background: C.amber, color: '#0d1117', fontSize: 13, fontWeight: 700, cursor: 'pointer',
           }}>
-            Open {skipped.length} download tab{skipped.length > 1 ? 's' : ''} + upload mods →
+            Open {skipped.filter(m => m.reason !== 'client_only').length} download tab{skipped.filter(m => m.reason !== 'client_only').length > 1 ? 's' : ''} + upload mods →
           </button>
         </div>
       )}
 
       <div style={{ display: 'flex', gap: 12 }}>
-        {done && skipped.length === 0 && (
+        {done && !skipped.some(m => m.reason !== 'client_only') && (
           <button onClick={() => onDone && onDone()} style={{
             padding: '9px 28px', borderRadius: 7, border: 'none',
             background: C.green, color: '#0d1117', fontSize: 13, fontWeight: 700, cursor: 'pointer',
           }}>Go to server →</button>
         )}
-        {done && skipped.length > 0 && (
+        {done && skipped.some(m => m.reason !== 'client_only') && (
           <button onClick={() => onDone && onDone()} style={{
             padding: '9px 22px', borderRadius: 7, border: `1px solid ${C.border}`,
             background: 'none', color: C.muted, fontSize: 13, cursor: 'pointer',
@@ -771,8 +864,8 @@ function ModUploadZone({ serverId, mods, onDone }) {
   const statusColor = { pending: C.dim, uploading: C.blue, done: C.green, error: C.red }
 
   return (
-    <div style={{ maxWidth: 560, margin: '0 auto', padding: '32px 24px', display: 'flex', flexDirection: 'column', gap: 20 }}>
-      <div>
+    <div style={{ maxWidth: 560, margin: '0 auto', padding: '32px 24px', display: 'flex', flexDirection: 'column', gap: 20, height: 'calc(100vh - 48px)', boxSizing: 'border-box' }}>
+      <div style={{ flexShrink: 0 }}>
         <div style={{ fontSize: 15, fontWeight: 700, color: C.text, marginBottom: 6 }}>Upload missing mods</div>
         <div style={{ fontSize: 12, color: C.muted, lineHeight: 1.6 }}>
           Download each mod from the browser tabs that just opened, then drag the <code>.jar</code> files into the zone below.
@@ -788,7 +881,7 @@ function ModUploadZone({ serverId, mods, onDone }) {
           border: `2px dashed ${dragging ? C.blue : C.border}`,
           borderRadius: 10, padding: '40px 24px', textAlign: 'center',
           background: dragging ? `${C.blue}0a` : C.surface2,
-          transition: 'all 150ms', cursor: 'pointer',
+          transition: 'all 150ms', cursor: 'pointer', flexShrink: 0,
         }}
         onClick={() => document.getElementById('mod-file-input').click()}
       >
@@ -804,26 +897,42 @@ function ModUploadZone({ serverId, mods, onDone }) {
       </div>
 
       {/* Mod checklist */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-        {uploads.map((u, i) => (
-          <div key={i} style={{
-            display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px',
-            borderRadius: 7, background: C.surface2, border: `1px solid ${u.status === 'done' ? `${C.green}44` : C.border}`,
-          }}>
-            <span style={{ fontSize: 14, color: statusColor[u.status], flexShrink: 0, fontWeight: 700 }}>
-              {statusIcon[u.status]}
-            </span>
-            <span style={{ flex: 1, fontSize: 12, fontFamily: 'monospace', color: u.status === 'done' ? C.text : C.muted }}>
-              {u.name}
-            </span>
-            {u.status === 'uploading' && <span style={{ fontSize: 11, color: C.blue }}>Uploading…</span>}
-            {u.status === 'error' && <span style={{ fontSize: 11, color: C.red }}>{u.errorMsg}</span>}
-            {u.status === 'done' && <span style={{ fontSize: 11, color: C.green }}>Uploaded</span>}
-          </div>
-        ))}
+      <div style={{ flex: 1, overflowY: 'auto', minHeight: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
+        {uploads.map((u, i) => {
+          const pageUrl = u.pageUrl ?? (u.projectId ? `https://www.curseforge.com/projects/${u.projectId}` : null)
+          return (
+            <div
+              key={i}
+              onClick={() => pageUrl && window.open(pageUrl, '_blank')}
+              title={pageUrl ? 'Click to open download page' : undefined}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px',
+                borderRadius: 7, background: C.surface2,
+                border: `1px solid ${u.status === 'done' ? `${C.green}44` : C.border}`,
+                cursor: pageUrl ? 'pointer' : 'default',
+                transition: 'background 150ms',
+              }}
+              onMouseEnter={e => { if (pageUrl) e.currentTarget.style.background = C.surface }}
+              onMouseLeave={e => { e.currentTarget.style.background = C.surface2 }}
+            >
+              <span style={{ fontSize: 14, color: statusColor[u.status], flexShrink: 0, fontWeight: 700 }}>
+                {statusIcon[u.status]}
+              </span>
+              <span style={{ flex: 1, fontSize: 12, fontFamily: 'monospace', color: u.status === 'done' ? C.text : C.muted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {u.name}
+              </span>
+              {u.status === 'uploading' && <span style={{ fontSize: 11, color: C.blue, flexShrink: 0 }}>Uploading…</span>}
+              {u.status === 'error'     && <span style={{ fontSize: 11, color: C.red, flexShrink: 0 }}>{u.errorMsg}</span>}
+              {u.status === 'done'      && <span style={{ fontSize: 11, color: C.green, flexShrink: 0 }}>Uploaded</span>}
+              {u.status === 'pending' && pageUrl && (
+                <span style={{ fontSize: 10, color: C.dim, flexShrink: 0 }}>↗</span>
+              )}
+            </div>
+          )
+        })}
       </div>
 
-      <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+      <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', flexShrink: 0 }}>
         <button onClick={() => onDone && onDone()} style={{
           padding: '9px 22px', borderRadius: 7, border: `1px solid ${C.border}`,
           background: 'none', color: C.muted, fontSize: 13, cursor: 'pointer',
@@ -911,26 +1020,17 @@ function StepSettings({ settings, setSettings }) {
       <SettingsRow>
         <div>
           <SettingsLabel>Memory (MB)</SettingsLabel>
-          <input type="number" min="512" value={settings.memory} onChange={e => set('memory', e.target.value)}
-            placeholder="e.g. 1024" style={settingsInp}
-            onFocus={e => { e.target.style.borderColor = C.blue }}
-            onBlur={e => { e.target.style.borderColor = C.border }} />
+          <NumberInput min={512} value={settings.memory} onChange={e => set('memory', e.target.value)} placeholder="e.g. 1024" step={512} />
         </div>
         <div>
           <SettingsLabel>Port</SettingsLabel>
-          <input type="number" min="1024" max="65535" value={settings.port} onChange={e => set('port', e.target.value)}
-            style={settingsInp}
-            onFocus={e => { e.target.style.borderColor = C.blue }}
-            onBlur={e => { e.target.style.borderColor = C.border }} />
+          <NumberInput min={1024} max={65535} value={settings.port} onChange={e => set('port', e.target.value)} />
         </div>
       </SettingsRow>
       <SettingsRow>
         <div>
           <SettingsLabel>Max players</SettingsLabel>
-          <input type="number" min="1" max="500" value={settings.maxPlayers} onChange={e => set('maxPlayers', e.target.value)}
-            style={settingsInp}
-            onFocus={e => { e.target.style.borderColor = C.blue }}
-            onBlur={e => { e.target.style.borderColor = C.border }} />
+          <NumberInput min={1} max={500} value={settings.maxPlayers} onChange={e => set('maxPlayers', e.target.value)} />
         </div>
         <div>
           <SettingsLabel>Game mode</SettingsLabel>
