@@ -25,7 +25,7 @@ async function list(req, res, next) {
   return reqCtx.run(buildCtx(req), async () => {
     try {
       const server = getServer(req);
-      res.json(await worldService.listWorlds(server.path));
+      res.json({ data: await worldService.listWorlds(server.path) });
     } catch (err) { next(err); }
   });
 }

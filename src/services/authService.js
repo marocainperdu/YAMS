@@ -7,6 +7,7 @@ const { v4: uuidv4 } = require('uuid');
 
 const userModel         = require('../models/userModel');
 const refreshTokenModel = require('../models/refreshTokenModel');
+const twoFAService      = require('./twoFAService');
 const { unauthorized, conflict, badRequest } = require('../utils/errors');
 
 const BCRYPT_ROUNDS        = 12;
@@ -22,6 +23,7 @@ function jwtSecret() {
 function hashToken(raw) {
   return crypto.createHash('sha256').update(raw).digest('hex');
 }
+
 
 function issueAccessToken(user) {
   return jwt.sign(
@@ -62,12 +64,12 @@ async function register(username, password, role = 'operator') {
 
 // ─── login ───────────────────────────────────────────────────────────────────
 
-async function login(username, password) {
+async function login(username, password, totpCode) {
   if (!username || !password) {
     throw badRequest('Username and password are required', 'MISSING_CREDENTIALS');
   }
 
-  const user = userModel.findByUsername(username);
+  const user = userModel.findByUsernameOrEmail(username);
 
   // Always run bcrypt compare to prevent timing oracle even when user is missing.
   // Use a dummy hash so the compare always takes the same time.
@@ -79,12 +81,22 @@ async function login(username, password) {
     throw unauthorized('Invalid credentials', 'INVALID_CREDENTIALS');
   }
 
+  // TOTP step: if the user has 2FA enabled, require and verify the code.
+  if (user.totp_enabled) {
+    if (!totpCode) {
+      return { requiresTOTP: true };
+    }
+    if (!twoFAService.verifyCode(user, String(totpCode))) {
+      throw unauthorized('Invalid authentication code', 'INVALID_TOTP');
+    }
+  }
+
   // Opportunistically prune stale tokens on login
   refreshTokenModel.purgeStale();
 
   const accessToken  = issueAccessToken(user);
   const refreshToken = issueRefreshToken(user.id);
-  return { accessToken, refreshToken };
+  return { token: accessToken, refreshToken, username: user.username, email: user.email ?? null, avatar: user.avatar ?? null };
 }
 
 // ─── refresh ─────────────────────────────────────────────────────────────────
@@ -106,7 +118,7 @@ async function refresh(rawToken) {
   refreshTokenModel.revoke(tokenHash);
   const accessToken     = issueAccessToken(user);
   const newRefreshToken = issueRefreshToken(user.id);
-  return { accessToken, refreshToken: newRefreshToken };
+  return { token: accessToken, refreshToken: newRefreshToken };
 }
 
 // ─── logout ──────────────────────────────────────────────────────────────────
@@ -125,6 +137,52 @@ function logoutAll(userId) {
   refreshTokenModel.revokeAll(userId);
 }
 
+// ─── getMe ───────────────────────────────────────────────────────────────────
+
+function getMe(userId) {
+  const user = userModel.findById(userId);
+  if (!user) throw unauthorized('User not found', 'USER_NOT_FOUND');
+  return {
+    id: user.id,
+    username: user.username,
+    role: user.role,
+    email: user.email ?? null,
+    avatar: user.avatar ?? null,
+    totpEnabled: !!user.totp_enabled,
+  };
+}
+
+// ─── updateMe ────────────────────────────────────────────────────────────────
+
+async function updateMe(userId, { username, email }) {
+  if (username !== undefined) {
+    if (typeof username !== 'string' || username.trim().length < 3)
+      throw badRequest('Username must be at least 3 characters', 'INVALID_USERNAME');
+    const existing = userModel.findByUsername(username.trim());
+    if (existing && existing.id !== userId)
+      throw conflict('Username already taken', 'USERNAME_TAKEN');
+    userModel.updateUsername(userId, username.trim());
+  }
+  if (email !== undefined) {
+    userModel.updateEmail(userId, email || null);
+  }
+  return getMe(userId);
+}
+
+// ─── changePassword ───────────────────────────────────────────────────────────
+
+async function changePassword(userId, currentPassword, newPassword) {
+  if (!currentPassword) throw badRequest('Current password is required', 'MISSING_CREDENTIALS');
+  if (!newPassword || newPassword.length < 8)
+    throw badRequest('New password must be at least 8 characters', 'INVALID_PASSWORD');
+  const user = userModel.findById(userId);
+  if (!user) throw unauthorized('User not found', 'USER_NOT_FOUND');
+  const match = await bcrypt.compare(currentPassword, user.password_hash);
+  if (!match) throw unauthorized('Current password is incorrect', 'WRONG_PASSWORD');
+  const hash = await bcrypt.hash(newPassword, BCRYPT_ROUNDS);
+  userModel.updatePassword(userId, hash);
+}
+
 // ─── seedAdmin ───────────────────────────────────────────────────────────────
 // Called once at startup when YAMS_ADMIN_USERNAME / YAMS_ADMIN_PASSWORD are set
 // and no users exist yet. Safe to call every boot — no-op if users already exist.
@@ -138,4 +196,11 @@ async function seedAdmin() {
   console.log(`[YAMS] Admin user '${username}' created.`);
 }
 
-module.exports = { register, login, refresh, logout, logoutAll, seedAdmin };
+function updateAvatar(userId, dataUrl) {
+  const { badRequest } = require('../utils/errors');
+  if (dataUrl && !dataUrl.startsWith('data:image/')) throw badRequest('Invalid image format', 'INVALID_AVATAR');
+  userModel.updateAvatar(userId, dataUrl ?? null);
+  return getMe(userId);
+}
+
+module.exports = { register, login, refresh, logout, logoutAll, seedAdmin, getMe, updateMe, changePassword, updateAvatar };

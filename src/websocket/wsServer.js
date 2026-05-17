@@ -45,7 +45,7 @@
  */
 
 const WebSocket = require('ws');
-const { subscribe, unsubscribe, sendCommand, streamEmitter, getObservability, CRASH_CLASSIFY } = require('../services/serverService');
+const { subscribe, unsubscribe, sendCommand, streamEmitter, broadcastInstallEvent, getObservability, CRASH_CLASSIFY } = require('../services/serverService');
 const observability = require('../utils/observability');
 
 // Mirrors the flag used by the HTTP middleware so WS auth is consistent.
@@ -279,6 +279,10 @@ function handleSubscribe(ws, msg, setId) {
       send(ws, { type: 'history', serverId, data: result.logs });
     }
     console.log(`[YAMS WS] Client subscribed to running server '${result.serverName}'`);
+  } else if (result.status === 'installing') {
+    // Server is installing — client will receive install_progress events
+    send(ws, { type: 'status', serverId, data: 'installing', server: result.serverName });
+    console.log(`[YAMS WS] Client subscribed to installing server '${result.serverName}'`);
   } else {
     // status === 'pending': server is offline; client will wait
     send(ws, { type: 'status', serverId, data: 'pending', server: result.serverName });

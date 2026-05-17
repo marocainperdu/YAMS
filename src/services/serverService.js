@@ -12,12 +12,33 @@
 
 const path = require('path');
 const fsp  = require('fs/promises');
+const fs   = require('fs');
 const { spawn } = require('child_process');
 const { EventEmitter } = require('events');
 const { v4: uuidv4 } = require('uuid');
 
-const serverModel = require('../models/serverModel');
-const fileManager = require('../utils/fileManager');
+// ── Java binary selection ─────────────────────────────────────────────────────
+const JAVA_PATHS = {
+  '8':    ['/usr/lib/jvm/java-8-openjdk/bin/java',  '/usr/lib/jvm/java-1.8-openjdk/bin/java'],
+  '11':   ['/usr/lib/jvm/java-11-openjdk/bin/java'],
+  '17':   ['/usr/lib/jvm/java-17-openjdk/bin/java'],
+  '21':   ['/usr/lib/jvm/java-21-openjdk/bin/java'],
+  '25':   ['/usr/lib/jvm/java-25-openjdk/bin/java', '/usr/local/bin/java'],
+  'auto': ['/usr/local/bin/java', '/usr/lib/jvm/java-25-openjdk/bin/java', '/usr/lib/jvm/java-21-openjdk/bin/java'],
+};
+
+function pickJavaBinary(javaVersion = 'auto') {
+  const candidates = JAVA_PATHS[javaVersion] ?? JAVA_PATHS['auto'];
+  for (const p of candidates) {
+    if (fs.existsSync(p)) return p;
+  }
+  return 'java';
+}
+
+const serverModel    = require('../models/serverModel');
+const scheduleModel  = require('../models/scheduleModel');
+const fileManager    = require('../utils/fileManager');
+const jarDownloader  = require('../utils/jarDownloader');
 const { badRequest, notFound, conflict, internal } = require('../utils/errors');
 const logPersist = require('../utils/logPersist');
 const observability = require('../utils/observability');
@@ -98,6 +119,14 @@ function broadcastToClients(id, msg) {
 const pendingClients = new Map();
 
 /**
+ * Map<serverId, Set<WebSocket>>
+ * Clients subscribed to a server that is currently in `status='installing'`.
+ * Receives install_progress / install_complete / install_error messages.
+ * Managed by subscribe() / unsubscribe() / clearInstallClients().
+ */
+const installClients = new Map();
+
+/**
  * Single write path for all stdout/stderr output from child processes.
  * Appends to the server's ring buffer then fans out to every active client.
  *
@@ -140,12 +169,19 @@ function pushLog(id, type, data) {
 (function reconcileOnStartup() {
   const { getDb } = require('../db');
   const db = getDb();
-  const result = db
+
+  const running = db
     .prepare("UPDATE servers SET status = 'stopped', pid = NULL WHERE status = 'running'")
     .run();
+  if (running.changes > 0) {
+    console.log(`[YAMS] Reconciled ${running.changes} stale running server(s) to stopped on startup`);
+  }
 
-  if (result.changes > 0) {
-    console.log(`[YAMS] Reconciled ${result.changes} stale running server(s) to stopped on startup`);
+  const installing = db
+    .prepare("UPDATE servers SET status = 'install_failed', install_error = 'YAMS restarted during installation' WHERE status = 'installing'")
+    .run();
+  if (installing.changes > 0) {
+    console.log(`[YAMS] Reconciled ${installing.changes} incomplete modpack install(s) to install_failed on startup`);
   }
 })();
 
@@ -185,15 +221,29 @@ function validateRam(ram) {
 // ---------------------------------------------------------------------------
 
 /**
- * Create a new server: validate → check conflicts → create files → save to DB.
- * @param {{ name: string, port: number|string, ram: string }} params
- * @returns {object} The created server record
+ * Create a new server: validate → check conflicts → create files → download JAR → save to DB.
+ *
+ * For modpack installs, supply modpackPlatform, modpackProjectId, modpackVersionId,
+ * modpackVersionFileUrl, and modpackVersionName. The server record is written to DB
+ * immediately with status='installing', then installPack() is fired asynchronously.
+ *
+ * @param {{ name, port, ram, engine, version, maxPlayers, motd, gamemode, pvp, onlineMode,
+ *           modpackPlatform?, modpackProjectId?, modpackVersionId?,
+ *           modpackVersionFileUrl?, modpackVersionName? }} params
+ * @returns {Promise<object>} The created server record
  */
-function createServer({ name, port, ram = '1G' }) {
+async function createServer({ name, port, ram = '1G', engine, version, maxPlayers, motd, gamemode, pvp, onlineMode,
+                              modpackPlatform, modpackProjectId, modpackVersionId, modpackVersionFileUrl, modpackVersionName }) {
+  const isModpack = Boolean(modpackPlatform);
+
   // 1. Validate inputs first — no side effects yet
   validateName(name);
   const validPort = validatePort(port);
   const validRam = validateRam(ram);
+
+  if (isModpack && !modpackVersionFileUrl) {
+    throw badRequest('modpackVersionFileUrl is required when creating from a modpack');
+  }
 
   // 2. Check for conflicts in DB
   if (serverModel.findByPort(validPort)) {
@@ -205,28 +255,71 @@ function createServer({ name, port, ram = '1G' }) {
 
   const serverPath = path.join(SERVERS_ROOT, name);
 
-  // 3. Disk operations — do these before writing to DB so we don't end up
-  //    with a DB record for a server whose directory creation failed
+  // 3. Disk operations — do these before writing to DB so a failure leaves no DB record
   try {
     fileManager.createServerDirectory(serverPath);
     fileManager.writeEula(serverPath);
-    fileManager.writeServerProperties(serverPath, { port: validPort, name });
+    fileManager.writeServerProperties(serverPath, { port: validPort, name, maxPlayers, motd, gamemode, pvp, onlineMode });
   } catch (err) {
-    // Best-effort cleanup: the directory might be partially created
-    // We don't try to delete it — leave it for the user to inspect
     throw internal(`Failed to create server directory: ${err.message}`);
   }
 
-  // 4. Persist to DB
-  const server = serverModel.create({
-    id: uuidv4(),
-    name,
-    path: serverPath,
-    port: validPort,
-    ram: validRam,
-  });
+  // 4a. For manual servers: download server.jar synchronously before DB write.
+  //     A failed download cleans up and never leaves an un-launchable record.
+  if (!isModpack && engine && version) {
+    try {
+      await jarDownloader.downloadServerJar(serverPath, engine, version);
+    } catch (err) {
+      try { await fsp.rm(serverPath, { recursive: true, force: true }); } catch {}
+      throw internal(`Failed to download server JAR: ${err.message}`);
+    }
+  }
 
-  console.log(`[YAMS] Created server '${name}' at ${serverPath}`);
+  // 5. Persist to DB
+  let server;
+  if (isModpack) {
+    // Modpack: write DB record with status='installing', then fire async install
+    server = serverModel.createFromModpack({
+      id:              uuidv4(),
+      name,
+      path:            serverPath,
+      port:            validPort,
+      ram:             validRam,
+      modpackPlatform,
+      modpackId:       modpackProjectId ?? null,
+      modpackVersion:  modpackVersionName ?? modpackVersionId ?? null,
+    });
+
+    // Fire-and-forget — no await; installPack handles its own error reporting
+    const modpackService = require('./modpackService');
+    modpackService.installPack(server, {
+      platform:       modpackPlatform,
+      versionFileUrl: modpackVersionFileUrl,
+      versionName:    modpackVersionName ?? modpackVersionId ?? 'unknown',
+    });
+
+    console.log(`[YAMS] Modpack install started for '${name}' (${modpackPlatform})`);
+  } else {
+    server = serverModel.create({
+      id:   uuidv4(),
+      name,
+      path: serverPath,
+      port: validPort,
+      ram:  validRam,
+    });
+    // Seed a disabled daily-backup template task so users have a working example.
+    scheduleModel.create({
+      id:       uuidv4(),
+      serverId: server.id,
+      name:     'Daily Backup',
+      type:     'backup',
+      cron:     '0 4 * * *',
+      command:  '',
+      enabled:  false,
+    });
+    console.log(`[YAMS] Created server '${name}' at ${serverPath}`);
+  }
+
   return server;
 }
 
@@ -238,6 +331,14 @@ function createServer({ name, port, ram = '1G' }) {
 function startServer(id) {
   const server = serverModel.findById(id);
   if (!server) throw notFound(`Server '${id}' not found`);
+
+  // Block start while installing or failed install
+  if (server.status === 'installing') {
+    throw conflict(`Server '${server.name}' is still installing. Cancel or wait for it to complete.`);
+  }
+  if (server.status === 'install_failed') {
+    throw conflict(`Server '${server.name}' has a failed installation. Delete it and recreate to try again.`);
+  }
 
   // Double-check both the DB state and the live Map
   if (processes.has(id) || server.status === 'running') {
@@ -260,25 +361,41 @@ function startServer(id) {
     throw badRequest(`Server path escapes SERVERS_ROOT — refusing to start`);
   }
 
-  // server.jar must be present before we attempt to spawn
+  // server.jar or run.sh must be present before we attempt to spawn
   if (!fileManager.serverJarExists(server.path)) {
     throw badRequest(
       `server.jar not found. Place a Minecraft server JAR at: ${path.join(server.path, 'server.jar')}`
     );
   }
 
-  // Build JVM arguments
-  const jvmArgs = [
-    `-Xms${server.ram}`,
-    `-Xmx${server.ram}`,
-    '-jar',
-    'server.jar',
-    '--nogui',
-  ];
+  // NeoForge installs a run.sh + user_jvm_args.txt instead of a single server.jar.
+  // Write RAM settings into user_jvm_args.txt so NeoForge picks them up.
+  const isRunScript = fileManager.usesRunScript(server.path);
+  if (isRunScript) {
+    const userJvmPath = path.join(server.path, 'user_jvm_args.txt');
+    const ramFlags = `-Xms${server.ram}\n-Xmx${server.ram}\n`;
+    try {
+      let existing = '';
+      try { existing = require('fs').readFileSync(userJvmPath, 'utf8'); } catch {}
+      const stripped = existing.replace(/-Xm[sx][^\n]*/g, '').trim();
+      require('fs').writeFileSync(userJvmPath, ramFlags + (stripped ? stripped + '\n' : ''));
+    } catch {}
+  }
+
+  // Build launch command: NeoForge uses run.sh, everything else uses java -jar server.jar
+  const javaBin = pickJavaBinary(server.java_version);
+  let spawnCmd, spawnArgs;
+  if (isRunScript) {
+    spawnCmd = 'sh';
+    spawnArgs = ['run.sh', '--nogui'];
+  } else {
+    spawnCmd = javaBin;
+    spawnArgs = [`-Xms${server.ram}`, `-Xmx${server.ram}`, '-jar', 'server.jar', '--nogui'];
+  }
 
   let child;
   try {
-    child = spawn('java', jvmArgs, {
+    child = spawn(spawnCmd, spawnArgs, {
       cwd: server.path,
       // Keep stdin open so we can send commands (e.g. 'stop') to the server
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -286,7 +403,7 @@ function startServer(id) {
       detached: false,
     });
   } catch (err) {
-    throw internal(`Failed to spawn java process: ${err.message}`);
+    throw internal(`Failed to spawn server process: ${err.message}`);
   }
 
   // If spawn() itself fails synchronously (e.g. java not found), child.pid is undefined
@@ -313,21 +430,34 @@ function startServer(id) {
     throw internal(`Started java but failed to save state to DB: ${err.message}`);
   }
 
+  // Always notify subscribers (webhooks, etc.) that the server started.
+  // This must fire unconditionally — the pending-client block below is only
+  // for promoting WS clients and would miss the event if no client is waiting.
+  streamEmitter.emit('status', { serverId: id, state: 'started', timestamp: Date.now() });
+
   // --- Process lifecycle event handlers ---
 
   // stdout: pipe to YAMS process stdout for local visibility, and push to the
   // ring buffer + broadcast to all subscribed WS clients via pushLog.
+  // Split chunks into individual lines — data events can deliver multiple
+  // newline-separated lines at once, which would cause blank lines in the UI.
   child.stdout.on('data', (data) => {
-    const line = data.toString();
-    process.stdout.write(`[${server.name}] ${line}`);
-    pushLog(id, 'stdout', line);
+    const chunk = data.toString();
+    process.stdout.write(`[${server.name}] ${chunk}`);
+    chunk.split('\n').forEach(line => {
+      const trimmed = line.replace(/\r$/, '');
+      if (trimmed) pushLog(id, 'stdout', trimmed);
+    });
   });
 
   // stderr: same pipeline, tagged 'stderr' so clients can style or filter it.
   child.stderr.on('data', (data) => {
-    const line = data.toString();
-    process.stderr.write(`[${server.name}] ERROR: ${line}`);
-    pushLog(id, 'stderr', line);
+    const chunk = data.toString();
+    process.stderr.write(`[${server.name}] ERROR: ${chunk}`);
+    chunk.split('\n').forEach(line => {
+      const trimmed = line.replace(/\r$/, '');
+      if (trimmed) pushLog(id, 'stderr', trimmed);
+    });
   });
 
   // Handles both graceful shutdown and unexpected crashes.
@@ -378,6 +508,7 @@ function startServer(id) {
       timestamp: Date.now(),
     });
 
+    streamEmitter.emit('status', { serverId: id, state: CRASH_CLASSIFY.STARTUP_FAILURE, timestamp: Date.now() });
     broadcastToClients(id, { type: 'status', serverId: id, timestamp: Date.now(), data: CRASH_CLASSIFY.STARTUP_FAILURE });
     processes.delete(id);
     serverModel.updateStatus(id, 'stopped', null);
@@ -400,13 +531,6 @@ function startServer(id) {
       }
     }
     pendingClients.delete(id);
-
-    // Emit started event
-    streamEmitter.emit('status', {
-      serverId: id,
-      state: 'started',
-      timestamp: Date.now(),
-    });
 
     // Notify all promoted clients (buffer is empty at this point — server just started)
     broadcastToClients(id, { type: 'status', serverId: id, timestamp: Date.now(), data: 'started', server: server.name });
@@ -446,10 +570,10 @@ function stopServer(id) {
     // Mark that we're intentionally stopping (so exit handler knows it's not a crash)
     entry.stopping = true;
 
-    // Emit stop event for subscribers
+    // Emit stop event for subscribers (use NORMAL_STOP so webhook handler recognises it)
     streamEmitter.emit('status', {
       serverId: id,
-      state: 'stopping',
+      state: CRASH_CLASSIFY.NORMAL_STOP,
       timestamp: Date.now(),
     });
 
@@ -525,6 +649,13 @@ function subscribe(serverId, ws) {
     return { status: 'subscribed', serverName: server.name, logs: [...entry.logs] };
   }
 
+  // Server is installing — add to install clients for progress events
+  if (server.status === 'installing') {
+    if (!installClients.has(serverId)) installClients.set(serverId, new Set());
+    installClients.get(serverId).add(ws);
+    return { status: 'installing', serverName: server.name };
+  }
+
   // Server is stopped — queue the client; it will be promoted in startServer()
   if (!pendingClients.has(serverId)) pendingClients.set(serverId, new Set());
   pendingClients.get(serverId).add(ws);
@@ -554,8 +685,13 @@ function unsubscribe(serverId, ws) {
   const pending = pendingClients.get(serverId);
   if (pending) {
     pending.delete(ws);
-    // Clean up the Map entry when no more pending clients remain
     if (pending.size === 0) pendingClients.delete(serverId);
+  }
+
+  const installing = installClients.get(serverId);
+  if (installing) {
+    installing.delete(ws);
+    if (installing.size === 0) installClients.delete(serverId);
   }
 
   // Clear the pending timeout if this ws had one attached
@@ -623,6 +759,47 @@ function getMetricsSnapshot() {
   return { serverList, totalActiveClients, totalPendingClients, droppedMessages };
 }
 
+/**
+ * Broadcast an install progress/complete/error message to all WS clients
+ * subscribed to this server's install channel.
+ * Called by modpackService as the installation progresses.
+ * @param {string} serverId
+ * @param {object} msg
+ */
+function broadcastInstallEvent(serverId, msg) {
+  const clients = installClients.get(serverId);
+  if (!clients || clients.size === 0) return;
+  const json = JSON.stringify(msg);
+  for (const ws of clients) {
+    if (ws.readyState === WS_OPEN && ws.bufferedAmount < BACKPRESSURE_BUFFER_LIMIT) {
+      ws.send(json);
+    }
+  }
+}
+
+/**
+ * Remove all install clients for a server (called after install completes or fails).
+ * @param {string} serverId
+ */
+function clearInstallClients(serverId) {
+  installClients.delete(serverId);
+}
+
+/**
+ * Cancel a running modpack install for a server.
+ * @param {string} id Server UUID
+ */
+function cancelInstallServer(id) {
+  const server = serverModel.findById(id);
+  if (!server) throw notFound(`Server '${id}' not found`);
+  if (server.status !== 'installing') {
+    throw conflict(`Server '${server.name}' is not currently installing`);
+  }
+  const modpackService = require('./modpackService');
+  modpackService.cancelInstall(id);
+  return server;
+}
+
 /** @returns {object[]} All servers from DB */
 function listServers() {
   return serverModel.findAll();
@@ -630,12 +807,68 @@ function listServers() {
 
 /**
  * @param {string} id
- * @returns {object} Server record
+ * @returns {object} Server record enriched with parsed server.properties
  */
 function getServer(id) {
   const server = serverModel.findById(id);
   if (!server) throw notFound(`Server '${id}' not found`);
-  return server;
+  const props = fileManager.readServerProperties(server.path);
+  return {
+    ...server,
+    motd:       props['motd']        ?? null,
+    maxPlayers: props['max-players'] ? Number(props['max-players']) : 20,
+    gamemode:   props['gamemode']    ?? 'survival',
+    pvp:        props['pvp'] !== undefined ? props['pvp'] === 'true' : true,
+    onlineMode: props['online-mode'] !== undefined ? props['online-mode'] === 'true' : true,
+  };
+}
+
+/**
+ * Update editable server settings: name, port, ram, and server.properties fields.
+ * The server must not be running (port change requires a restart anyway).
+ * @param {string} id
+ * @param {{ name?, port?, ram?, motd?, maxPlayers?, gamemode?, pvp?, onlineMode? }} fields
+ * @returns {object} Updated server record
+ */
+function updateServerSettings(id, fields) {
+  const server = serverModel.findById(id);
+  if (!server) throw notFound(`Server '${id}' not found`);
+  if (processes.has(id)) throw conflict('Stop the server before changing its settings');
+
+  const name        = fields.name        !== undefined ? fields.name        : server.name;
+  const port        = fields.port        !== undefined ? fields.port        : server.port;
+  const ram         = fields.ram         !== undefined ? fields.ram         : server.ram;
+  const javaVersion = fields.javaVersion !== undefined ? fields.javaVersion : (server.java_version ?? 'auto');
+
+  if (fields.name !== undefined) validateName(name);
+  const validPort = validatePort(port);
+  const validRam  = validateRam(ram);
+  if (!['auto', '8', '11', '17', '21', '25'].includes(javaVersion)) throw badRequest('javaVersion must be "auto", "8", "11", "17", "21", or "25"');
+
+  if (fields.port !== undefined && validPort !== server.port) {
+    const conflict_ = serverModel.findByPort(validPort);
+    if (conflict_ && conflict_.id !== id) throw conflict(`Port ${validPort} is already in use`);
+  }
+  if (fields.name !== undefined && name !== server.name) {
+    const conflict_ = serverModel.findByName(name);
+    if (conflict_ && conflict_.id !== id) throw conflict(`A server named '${name}' already exists`);
+  }
+
+  serverModel.update(id, { name, port: validPort, ram: validRam, javaVersion });
+
+  const propPatches = {};
+  if (fields.port       !== undefined) propPatches['server-port']  = validPort;
+  if (fields.motd       !== undefined) propPatches['motd']         = fields.motd;
+  if (fields.maxPlayers !== undefined) propPatches['max-players']  = Number(fields.maxPlayers);
+  if (fields.gamemode   !== undefined) propPatches['gamemode']     = fields.gamemode;
+  if (fields.pvp        !== undefined) propPatches['pvp']          = fields.pvp ? 'true' : 'false';
+  if (fields.onlineMode !== undefined) propPatches['online-mode']  = fields.onlineMode ? 'true' : 'false';
+
+  if (Object.keys(propPatches).length > 0) {
+    fileManager.patchServerProperties(server.path, propPatches);
+  }
+
+  return getServer(id);
 }
 
 /**
@@ -655,6 +888,9 @@ function getServer(id) {
 async function deleteServer(id) {
   const server = getServer(id);
   if (processes.has(id)) throw conflict('Stop the server before deleting it', 'SERVER_RUNNING');
+  if (server.status === 'installing') {
+    throw conflict(`Server '${server.name}' is installing. Cancel the installation first.`, 'SERVER_INSTALLING');
+  }
   serverModel.remove(id);
   await fsp.rm(server.path, { recursive: true, force: true }).catch(err => {
     console.error(`[YAMS] Could not remove server directory: ${err.message}`);
@@ -667,11 +903,25 @@ function getChildProcess(serverId) {
   return entry ? entry.child : null;
 }
 
+/**
+ * Return the current in-memory ring buffer for a server.
+ * Used by GET /servers/:id/logs so the console tab can show existing
+ * log lines immediately — before the WebSocket finishes its subscribe handshake.
+ */
+function getServerLogs(id) {
+  const server = serverModel.findById(id);
+  if (!server) throw notFound(`Server '${id}' not found`);
+  const entry = processes.get(id);
+  return entry ? [...entry.logs] : [];
+}
+
 module.exports = {
-  createServer, startServer, stopServer, deleteServer, listServers, getServer,
+  createServer, startServer, stopServer, deleteServer, listServers, getServer, updateServerSettings,
   subscribe, unsubscribe, sendCommand,
+  cancelInstallServer, broadcastInstallEvent, clearInstallClients,
   getChildProcess,
   streamEmitter,
+  getServerLogs,
   getObservability: observability.getObservability,
   getMetricsSnapshot,
   LOG_BUFFER_SIZE,

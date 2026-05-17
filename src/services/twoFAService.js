@@ -1,10 +1,11 @@
 'use strict';
 
-const crypto                              = require('crypto');
-const { generateSecret, generateSync, verifySync, TOTP } = require('otplib');
-const bcrypt                              = require('bcryptjs');
+const crypto = require('crypto');
+const { NobleCryptoPlugin, ScureBase32Plugin, generateSecret, generateURI, verifySync } = require('otplib');
+const bcrypt = require('bcryptjs');
 
-const _totp = new TOTP();
+const _crypto = new NobleCryptoPlugin();
+const _base32 = new ScureBase32Plugin();
 const userModel          = require('../models/userModel');
 const { badRequest, notFound, unauthorized } = require('../utils/errors');
 
@@ -55,11 +56,11 @@ function setup(userId) {
   if (!user) throw notFound('User not found');
   if (user.totp_enabled) throw badRequest('2FA is already enabled');
 
-  const secret = generateSecret();
+  const secret = generateSecret({ crypto: _crypto, base32: _base32 });
   // H3 — store encrypted secret; totp_enabled stays 0 until verified
   userModel.updateTotp(userId, { secret: encryptSecret(secret), enabled: false });
 
-  const otpauthUri = _totp.toURI({ label: user.email, issuer: ISSUER, secret });
+  const otpauthUri = generateURI({ type: 'totp', label: user.email || user.username, issuer: ISSUER, secret, crypto: _crypto, base32: _base32 });
   return { secret, otpauthUri };
 }
 
@@ -72,7 +73,7 @@ function enable(userId, code) {
   const secret = decryptSecret(user.totp_secret);
   if (!secret) throw badRequest('Unable to verify. Run setup again.');
 
-  if (!verifySync({ token: code, secret }).valid) {
+  if (!verifySync({ token: code, secret, crypto: _crypto, base32: _base32 }).valid) {
     throw unauthorized('Invalid verification code');
   }
 
@@ -93,7 +94,7 @@ async function disable(userId, code, currentPassword) {
   const secret = decryptSecret(user.totp_secret);
   if (!secret) throw badRequest('2FA configuration error. Contact an administrator.');
 
-  if (!verifySync({ token: code, secret }).valid) {
+  if (!verifySync({ token: code, secret, crypto: _crypto, base32: _base32 }).valid) {
     throw unauthorized('Invalid verification code');
   }
 
@@ -110,9 +111,9 @@ function verifyCode(user, code) {
   const codeHash = crypto.createHash('sha256').update(code).digest('hex');
   if (user.totp_last_code && codeHash === user.totp_last_code) return false;
 
-  const valid = verifySync({ token: code, secret }).valid;
-  if (valid) userModel.updateTotpLastCode(user.id, codeHash);
-  return valid;
+  const result = verifySync({ token: code, secret, crypto: _crypto, base32: _base32 });
+  if (result.valid) userModel.updateTotpLastCode(user.id, codeHash);
+  return result.valid;
 }
 
 module.exports = { setup, enable, disable, verifyCode };

@@ -3,7 +3,7 @@ import { C, apiUrl } from '../lib/yamsShared'
 
 export default function LoginPage({ onLogin }) {
   const [tab, setTab] = React.useState('login')
-  const [email, setEmail] = React.useState('')
+  const [username, setUsername] = React.useState('')
   const [password, setPassword] = React.useState('')
   const [error, setError] = React.useState(null)
   const [loading, setLoading] = React.useState(false)
@@ -16,7 +16,7 @@ export default function LoginPage({ onLogin }) {
     setError(null)
     setLoading(true)
     try {
-      const body_req = { email, password }
+      const body_req = { username, password }
       if (totpCodeValue) body_req.totpCode = totpCodeValue
       const res = await fetch(apiUrl('/auth/login'), {
         method: 'POST',
@@ -34,7 +34,7 @@ export default function LoginPage({ onLogin }) {
 
       const [, seg] = token.split('.')
       const payload = JSON.parse(atob(seg.replace(/-/g, '+').replace(/_/g, '/')))
-      onLogin({ email, userId: payload.userId, role: payload.role, token, forcePasswordChange: !!body.data?.forcePasswordChange, username: body.data?.username ?? null })
+      onLogin({ id: payload.userId, role: payload.role, token, refreshToken: body.data?.refreshToken ?? null, forcePasswordChange: !!body.data?.forcePasswordChange, username: body.data?.username ?? username, email: body.data?.email ?? null, avatar: body.data?.avatar ?? null })
     } catch {
       setError('Could not reach the server. Is YAMS running?')
     } finally {
@@ -44,7 +44,7 @@ export default function LoginPage({ onLogin }) {
 
   async function handleLogin(e) {
     e.preventDefault()
-    if (!email || !password) { setError('Email and password are required.'); return }
+    if (!username || !password) { setError('Username and password are required.'); return }
     await submitLogin(null)
   }
 
@@ -127,10 +127,10 @@ export default function LoginPage({ onLogin }) {
           {tab === 'login' && (
             <form onSubmit={handleLogin} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                <label style={{ fontSize: 12, fontWeight: 500, color: C.muted }}>Email</label>
+                <label style={{ fontSize: 12, fontWeight: 500, color: C.muted }}>Username or email</label>
                 <input
-                  type="email" value={email} onChange={e => setEmail(e.target.value)}
-                  placeholder="admin@example.com" autoFocus
+                  type="text" value={username} onChange={e => setUsername(e.target.value)}
+                  placeholder="admin" autoFocus autoComplete="username"
                   style={inputStyle}
                   onFocus={e => { e.target.style.borderColor = C.blue }}
                   onBlur={e => { e.target.style.borderColor = C.border }}
@@ -174,12 +174,12 @@ export default function LoginPage({ onLogin }) {
                 <button onClick={() => { setTab('login'); setSent(false) }} style={{ marginTop: 8, fontSize: 12, color: C.blue, background: 'none', border: 'none', cursor: 'pointer' }}>← Back to sign in</button>
               </div>
               : <form onSubmit={handleForgot} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-                <div style={{ fontSize: 12, color: C.muted, marginBottom: 4 }}>Enter your email and we'll send you a reset link.</div>
+                <div style={{ fontSize: 12, color: C.muted, marginBottom: 4 }}>Enter your username and contact your administrator for a reset.</div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  <label style={{ fontSize: 12, fontWeight: 500, color: C.muted }}>Email</label>
+                  <label style={{ fontSize: 12, fontWeight: 500, color: C.muted }}>Username</label>
                   <input
-                    type="email" value={email} onChange={e => setEmail(e.target.value)}
-                    placeholder="admin@example.com" autoFocus
+                    type="text" value={username} onChange={e => setUsername(e.target.value)}
+                    placeholder="admin" autoFocus autoComplete="username"
                     style={inputStyle}
                     onFocus={e => { e.target.style.borderColor = C.blue }}
                     onBlur={e => { e.target.style.borderColor = C.border }}

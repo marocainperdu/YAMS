@@ -33,9 +33,11 @@ function formatLogLine({ type, data, timestamp }) {
 }
 
 function wsBaseUrl() {
-  if (import.meta.env.VITE_WS_URL) return import.meta.env.VITE_WS_URL
+  const token = sessionStorage.getItem('yams_token') ?? ''
+  const query = token ? `?token=${encodeURIComponent(token)}` : ''
+  if (import.meta.env.VITE_WS_URL) return import.meta.env.VITE_WS_URL + query
   const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-  return `${proto}//${window.location.host}/ws`
+  return `${proto}//${window.location.host}/ws${query}`
 }
 
 export default function ConsolePage({ serverId, navigate }) {
@@ -219,7 +221,7 @@ export default function ConsolePage({ serverId, navigate }) {
   }
 
   const wsColor = wsStatus === 'connected' ? C.green : wsStatus === 'lost' ? C.red : C.amber
-  const wsLabel = wsStatus === 'connected' ? 'Connected' : wsStatus === 'lost' ? 'Disconnected' : 'Connecting…'
+  const wsLabel = wsStatus === 'lost' ? 'Disconnected' : null
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: C.bg }}>

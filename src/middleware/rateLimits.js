@@ -16,15 +16,4 @@ const heavyOpLimiter = rateLimit({
   skipFailedRequests: false,
 });
 
-// Auth endpoint limiter: 10 requests per 15 minutes per IP.
-// Applied to POST /auth/login and POST /auth/refresh to limit brute-force.
-const authLimiter = rateLimit({
-  windowMs:         15 * 60 * 1000, // 15 minutes
-  max:              10,
-  standardHeaders:  true,
-  legacyHeaders:    false,
-  message:          { error: 'Too many attempts, please try again later.', code: 'RATE_LIMITED' },
-  skipFailedRequests: false,
-});
-
-module.exports = { heavyOpLimiter, authLimiter };
+module.exports = { heavyOpLimiter };

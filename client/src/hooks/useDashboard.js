@@ -24,9 +24,9 @@ export default function useDashboard() {
           port: s.port,
           clients: s.clients || 0,
           maxClients: 50,
-          uptime: s.uptime || 0,
+          uptime: Math.floor((s.uptime || 0) / 1000),
         })),
-        systemUptime: metrics.uptime || 0,
+        systemUptime: Math.floor((metrics.uptime || 0) / 1000),
         systemHealth: 0.95,
         logs: (metrics.recentLogs || []).map((l, i) => ({
           id: l.id || i,

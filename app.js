@@ -15,14 +15,23 @@ const swaggerUi = require('swagger-ui-express');
 // stale 'running' status from a previous session that crashed.
 const { getDb } = require('./src/db');
 require('./src/services/serverService');
-require('./src/services/metricsService').init(); // start log parsing listeners
+require('./src/services/metricsService').init();   // start log parsing listeners
+require('./src/services/schedulerService').init(); // start cron tick loop
+require('./src/services/webhookService').init();   // subscribe to server lifecycle events
 
 const authRoutes    = require('./src/routes/authRoutes');
+const twoFARoutes   = require('./src/routes/twoFARoutes');
 const serverRoutes  = require('./src/routes/serverRoutes');
+const modpackRoutes = require('./src/routes/modpackRoutes');
 const fileRoutes    = require('./src/routes/fileRoutes');
 const backupRoutes  = require('./src/routes/backupRoutes');
 const worldRoutes   = require('./src/routes/worldRoutes');
-const metricsRoutes = require('./src/routes/metricsRoutes');
+const metricsRoutes   = require('./src/routes/metricsRoutes');
+const scheduleRoutes  = require('./src/routes/scheduleRoutes');
+const webhookRoutes   = require('./src/routes/webhookRoutes');
+const playerRoutes    = require('./src/routes/playerRoutes');
+const modsRoutes      = require('./src/routes/modsRoutes');
+const { userRouter, permissionRouter } = require('./src/routes/userRoutes');
 const swaggerSpec = require('./src/swagger');
 const { createWsServer } = require('./src/websocket/wsServer');
 
@@ -33,7 +42,7 @@ const PORT = process.env.PORT || 3000;
 // Middleware
 // ---------------------------------------------------------------------------
 
-app.use(express.json({ limit: '16kb' }));
+app.use(express.json({ limit: '4mb' }));
 
 // Security headers
 app.use((_req, res, next) => {
@@ -55,12 +64,20 @@ app.use((req, _res, next) => {
 
 app.get('/health', (_req, res) => res.json({ status: 'ok' }));
 
-app.use('/auth',    authRoutes);
-app.use('/servers', serverRoutes);
-app.use('/servers/:id/files', fileRoutes);
-app.use('/servers/:id/backups', backupRoutes);
-app.use('/servers/:id/worlds', worldRoutes);
-app.use('/metrics', metricsRoutes);
+app.use('/api/auth/2fa',                twoFARoutes);
+app.use('/api/auth',                    authRoutes);
+app.use('/api/servers',                 serverRoutes);
+app.use('/api/modpacks',                modpackRoutes);
+app.use('/api/servers/:id/files',       fileRoutes);
+app.use('/api/servers/:id/backups',     backupRoutes);
+app.use('/api/servers/:id/worlds',      worldRoutes);
+app.use('/api/servers/:id/schedules',   scheduleRoutes);
+app.use('/api/servers/:id/webhooks',    webhookRoutes);
+app.use('/api/servers/:id/players',    playerRoutes);
+app.use('/api/servers/:id/mods',       modsRoutes);
+app.use('/api/metrics',                 metricsRoutes);
+app.use('/api/users',                   userRouter);
+app.use('/api/permissions',             permissionRouter);
 app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 
 // ---------------------------------------------------------------------------
@@ -124,36 +141,36 @@ const BIND   = process.env.BIND_ADDRESS || '127.0.0.1';
 const server = app.listen(PORT, BIND, () => {
   console.log(`[YAMS] Running on http://localhost:${PORT}`);
   console.log('[YAMS] Endpoints:');
-  console.log('  POST   /auth/login');
-  console.log('  POST   /auth/refresh');
-  console.log('  POST   /auth/logout');
-  console.log('  POST   /auth/logout-all');
-  console.log('  POST   /auth/register');
-  console.log('  POST   /servers');
-  console.log('  GET    /servers');
-  console.log('  GET    /servers/:id');
-  console.log('  DELETE /servers/:id');
-  console.log('  POST   /servers/:id/start');
-  console.log('  POST   /servers/:id/stop');
-  console.log('  GET    /servers/:id/metrics');
-  console.log('  GET    /servers/:id/files');
-  console.log('  GET    /servers/:id/files/download?path=');
-  console.log('  POST   /servers/:id/files/upload');
-  console.log('  POST   /servers/:id/files/mkdir');
-  console.log('  PUT    /servers/:id/files/rename');
-  console.log('  DELETE /servers/:id/files');
-  console.log('  POST   /servers/:id/backups');
-  console.log('  GET    /servers/:id/backups');
-  console.log('  GET    /servers/:id/backups/:backupId/download');
-  console.log('  DELETE /servers/:id/backups/:backupId');
-  console.log('  POST   /servers/:id/backups/:backupId/restore');
-  console.log('  GET    /servers/:id/worlds');
-  console.log('  GET    /servers/:id/worlds/:name');
-  console.log('  POST   /servers/:id/worlds/active');
-  console.log('  DELETE /servers/:id/worlds/:name');
-  console.log('  POST   /servers/:id/worlds/import');
-  console.log('  GET    /servers/:id/worlds/:name/export');
-  console.log('  GET    /metrics');
+  console.log('  POST   /api/auth/login');
+  console.log('  POST   /api/auth/refresh');
+  console.log('  POST   /api/auth/logout');
+  console.log('  POST   /api/auth/logout-all');
+  console.log('  POST   /api/auth/register');
+  console.log('  POST   /api/servers');
+  console.log('  GET    /api/servers');
+  console.log('  GET    /api/servers/:id');
+  console.log('  DELETE /api/servers/:id');
+  console.log('  POST   /api/servers/:id/start');
+  console.log('  POST   /api/servers/:id/stop');
+  console.log('  GET    /api/servers/:id/metrics');
+  console.log('  GET    /api/servers/:id/files');
+  console.log('  GET    /api/servers/:id/files/download?path=');
+  console.log('  POST   /api/servers/:id/files/upload');
+  console.log('  POST   /api/servers/:id/files/mkdir');
+  console.log('  PUT    /api/servers/:id/files/rename');
+  console.log('  DELETE /api/servers/:id/files');
+  console.log('  POST   /api/servers/:id/backups');
+  console.log('  GET    /api/servers/:id/backups');
+  console.log('  GET    /api/servers/:id/backups/:backupId/download');
+  console.log('  DELETE /api/servers/:id/backups/:backupId');
+  console.log('  POST   /api/servers/:id/backups/:backupId/restore');
+  console.log('  GET    /api/servers/:id/worlds');
+  console.log('  GET    /api/servers/:id/worlds/:name');
+  console.log('  POST   /api/servers/:id/worlds/active');
+  console.log('  DELETE /api/servers/:id/worlds/:name');
+  console.log('  POST   /api/servers/:id/worlds/import');
+  console.log('  GET    /api/servers/:id/worlds/:name/export');
+  console.log('  GET    /api/metrics');
   console.log(`  WS     ws://localhost:${PORT}/ws`);
   console.log(`  Docs   http://localhost:${PORT}/api-docs`);
 

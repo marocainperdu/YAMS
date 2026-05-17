@@ -16,5 +16,9 @@ export const C = {
 };
 
 export function statusColor(status) {
-  return status === 'running' ? C.green : status === 'crashed' ? C.red : C.dim;
+  if (status === 'running')        return C.green;
+  if (status === 'crashed')        return C.red;
+  if (status === 'installing')     return C.blue;
+  if (status === 'install_failed') return C.red;
+  return C.dim;
 }

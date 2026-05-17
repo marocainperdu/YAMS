@@ -9,9 +9,9 @@ function extractBearer(req) {
 
 async function login(req, res, next) {
   try {
-    const { username, password } = req.body ?? {};
-    const tokens = await authService.login(username, password);
-    res.json({ data: tokens });
+    const { username, password, totpCode } = req.body ?? {};
+    const result = await authService.login(username, password, totpCode);
+    res.json({ data: result });
   } catch (err) {
     next(err);
   }
@@ -56,4 +56,34 @@ async function register(req, res, next) {
   }
 }
 
-module.exports = { login, refresh, logout, logoutAll, register };
+async function getMe(req, res, next) {
+  try {
+    res.json({ data: authService.getMe(req.user.userId) });
+  } catch (err) { next(err); }
+}
+
+async function updateMe(req, res, next) {
+  try {
+    const { username, email } = req.body ?? {};
+    const data = await authService.updateMe(req.user.userId, { username, email });
+    res.json({ data });
+  } catch (err) { next(err); }
+}
+
+async function changePassword(req, res, next) {
+  try {
+    const { currentPassword, newPassword } = req.body ?? {};
+    await authService.changePassword(req.user.userId, currentPassword, newPassword);
+    res.status(204).end();
+  } catch (err) { next(err); }
+}
+
+async function updateAvatar(req, res, next) {
+  try {
+    const { avatar } = req.body ?? {};
+    const data = authService.updateAvatar(req.user.userId, avatar ?? null);
+    res.json({ data });
+  } catch (err) { next(err); }
+}
+
+module.exports = { login, refresh, logout, logoutAll, register, getMe, updateMe, changePassword, updateAvatar };

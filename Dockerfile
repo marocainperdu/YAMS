@@ -24,8 +24,15 @@ RUN npm ci --omit=dev
 # ── Stage 3: runtime ──────────────────────────────────────────────────────────
 FROM node:22-alpine AS runtime
 
-# OpenJDK 21 JRE — required to spawn Minecraft server JVM processes
-RUN apk add --no-cache openjdk21-jre
+# Java runtimes for Minecraft servers (all versions available in Alpine):
+#   Java 8  — MC < 1.12    (classic modpacks)
+#   Java 11 — MC 1.12–1.16
+#   Java 17 — MC 1.17–1.20
+#   Java 21 — MC 1.21–1.21.4
+#   Java 25 — MC 1.21.5+  (class file 69); set as default (backward-compatible)
+# su-exec — minimal setuid helper to drop from root to node user in entrypoint
+RUN apk add --no-cache openjdk8-jre openjdk11-jre openjdk17-jre openjdk21-jre openjdk25-jre su-exec \
+ && ln -sf /usr/lib/jvm/java-25-openjdk/bin/java /usr/local/bin/java
 
 WORKDIR /app
 
@@ -39,21 +46,27 @@ COPY src/ ./src/
 # Built frontend served as static files by Express
 COPY --from=builder /build/dist ./client/dist
 
-# Create runtime directories (actual data comes from mounted volumes)
+# Create runtime directories (actual data comes from bind mounts)
 RUN mkdir -p /app/data /app/servers \
  && chown -R node:node /app
 
-USER node
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+# Entrypoint runs as root briefly to fix bind-mount ownership, then drops to node
+USER root
 
 ENV PORT=3000 \
     BIND_ADDRESS=127.0.0.1 \
     YAMS_DB=/app/data/yams.db \
     YAMS_SERVERS_ROOT=/app/servers \
-    NODE_ENV=production
+    NODE_ENV=production \
+    JAVA_HOME=/usr/lib/jvm/java-25-openjdk \
+    JAVA_21_HOME=/usr/lib/jvm/java-21-openjdk
 
 EXPOSE 3000
 
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
-  CMD wget -qO- http://localhost:3000/health || exit 1
+  CMD wget -qO- http://127.0.0.1:3000/health || exit 1
 
-CMD ["node", "app.js"]
+ENTRYPOINT ["/entrypoint.sh"]

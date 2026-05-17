@@ -36,9 +36,20 @@ export default function AccountPage({ currentUser, onUpdate }) {
 function ProfileTab({ currentUser, onUpdate }) {
   const [name, setName] = React.useState(currentUser?.username || '')
   const [email, setEmail] = React.useState(currentUser?.email || '')
+  const [avatar, setAvatar] = React.useState(currentUser?.avatar ?? null)
   const [saved, setSaved] = React.useState(false)
   const [loading, setLoading] = React.useState(false)
+  const [avatarLoading, setAvatarLoading] = React.useState(false)
   const [error, setError] = React.useState(null)
+  const fileInputRef = React.useRef(null)
+
+  React.useEffect(() => {
+    apiFetch('/auth/me').then(res => {
+      if (res.data?.username) setName(res.data.username)
+      if (res.data?.email) setEmail(res.data.email)
+      if (res.data?.avatar !== undefined) setAvatar(res.data.avatar)
+    }).catch(() => {})
+  }, [])
 
   async function handleSave(e) {
     e.preventDefault()
@@ -51,13 +62,47 @@ function ProfileTab({ currentUser, onUpdate }) {
         body: JSON.stringify({ username: name, email }),
       })
       setSaved(true)
-      onUpdate && onUpdate({ ...currentUser, username: updated.data.username, email: updated.data.email })
+      onUpdate && onUpdate({ ...currentUser, username: updated.data.username, email: updated.data.email, avatar: avatar })
       setTimeout(() => setSaved(false), 2500)
     } catch (err) {
       setError(err.message)
     } finally {
       setLoading(false)
     }
+  }
+
+  function handleFileChange(e) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setAvatarLoading(true)
+    const reader = new FileReader()
+    reader.onload = async (ev) => {
+      const img = new Image()
+      img.onload = async () => {
+        const size = 256
+        const canvas = document.createElement('canvas')
+        canvas.width = size
+        canvas.height = size
+        const ctx = canvas.getContext('2d')
+        const scale = Math.max(size / img.width, size / img.height)
+        const w = img.width * scale
+        const h = img.height * scale
+        ctx.drawImage(img, (size - w) / 2, (size - h) / 2, w, h)
+        const dataUrl = canvas.toDataURL('image/webp', 0.92)
+        try {
+          const res = await apiFetch('/auth/avatar', { method: 'PUT', body: JSON.stringify({ avatar: dataUrl }) })
+          setAvatar(res.data.avatar)
+          onUpdate && onUpdate({ ...currentUser, avatar: res.data.avatar })
+        } catch (err) {
+          setError(err.message)
+        } finally {
+          setAvatarLoading(false)
+        }
+      }
+      img.src = ev.target.result
+    }
+    reader.readAsDataURL(file)
+    e.target.value = ''
   }
 
   const inp = {
@@ -75,18 +120,36 @@ function ProfileTab({ currentUser, onUpdate }) {
         <div style={{ background: `${C.red}12`, border: `1px solid ${C.red}44`, borderRadius: 6, padding: '9px 12px', fontSize: 12, color: C.red }}>{error}</div>
       )}
       <div style={{ display: 'flex', alignItems: 'center', gap: 18, marginBottom: 4 }}>
-        <div style={{
-          width: 64, height: 64, borderRadius: '50%', background: C.surface2,
-          border: `2px solid ${C.border}`, display: 'flex', alignItems: 'center',
-          justifyContent: 'center', fontSize: 24, color: C.muted, flexShrink: 0,
-        }}>
-          {currentUser?.avatar
-            ? <img src={currentUser.avatar} style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} />
+        <div
+          onClick={() => fileInputRef.current?.click()}
+          title="Click to upload a photo"
+          style={{
+            width: 64, height: 64, borderRadius: '50%', background: C.surface2,
+            border: `2px solid ${C.border}`, display: 'flex', alignItems: 'center',
+            justifyContent: 'center', fontSize: 24, color: C.muted, flexShrink: 0,
+            overflow: 'hidden', cursor: 'pointer', position: 'relative',
+          }}>
+          {avatar
+            ? <img src={avatar} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
             : (name || currentUser?.username || '?')[0].toUpperCase()}
+          {avatarLoading && (
+            <div style={{ position: 'absolute', inset: 0, background: '#00000066', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, color: '#fff' }}>...</div>
+          )}
         </div>
         <div>
           <div style={{ fontSize: 13, fontWeight: 600, color: C.text, marginBottom: 4 }}>Profile picture</div>
-          <div style={{ fontSize: 12, color: C.muted }}>Avatar upload — coming soon</div>
+          <button type="button" onClick={() => fileInputRef.current?.click()}
+            style={{ fontSize: 12, color: C.blue, background: 'none', border: 'none', cursor: 'pointer', padding: 0, marginBottom: avatar ? 4 : 0 }}>
+            Upload photo
+          </button>
+          {avatar && (
+            <button type="button" onClick={async () => {
+              try { const res = await apiFetch('/auth/avatar', { method: 'PUT', body: JSON.stringify({ avatar: null }) }); setAvatar(null); onUpdate && onUpdate({ ...currentUser, avatar: null }) } catch {}
+            }} style={{ fontSize: 12, color: C.red, background: 'none', border: 'none', cursor: 'pointer', padding: 0, marginLeft: 10 }}>
+              Remove
+            </button>
+          )}
+          <input ref={fileInputRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={handleFileChange} />
         </div>
       </div>
 

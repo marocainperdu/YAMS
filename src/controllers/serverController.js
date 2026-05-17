@@ -10,12 +10,20 @@ const serverService = require('../services/serverService');
 
 /**
  * POST /servers
- * Body: { name, port, ram? }
+ * Manual: { name, port, ram?, engine?, version?, maxPlayers?, motd?, gamemode?, pvp?, onlineMode? }
+ * Modpack: { name, port, ram?, modpackPlatform, modpackProjectId, modpackVersionId,
+ *            modpackVersionFileUrl, modpackVersionName? }
  */
 async function create(req, res, next) {
   try {
-    const { name, port, ram } = req.body;
-    const server = serverService.createServer({ name, port, ram });
+    const {
+      name, port, ram, engine, version, maxPlayers, motd, gamemode, pvp, onlineMode,
+      modpackPlatform, modpackProjectId, modpackVersionId, modpackVersionFileUrl, modpackVersionName,
+    } = req.body;
+    const server = await serverService.createServer({
+      name, port, ram, engine, version, maxPlayers, motd, gamemode, pvp, onlineMode,
+      modpackPlatform, modpackProjectId, modpackVersionId, modpackVersionFileUrl, modpackVersionName,
+    });
     res.status(201).json({ data: server });
   } catch (err) {
     next(err);
@@ -82,4 +90,57 @@ async function remove(req, res, next) {
   }
 }
 
-module.exports = { create, list, getOne, start, stop, remove };
+/**
+ * POST /servers/reorder
+ * Body: { order: [id1, id2, ...] }
+ */
+function reorder(req, res, next) {
+  try {
+    const { order } = req.body;
+    if (!Array.isArray(order) || order.length === 0)
+      return next(require('../utils/errors').badRequest('order must be a non-empty array of server IDs'));
+    require('../models/serverModel').reorder(order);
+    res.status(204).end();
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * PATCH /servers/:id/settings
+ * Body: { name?, port?, ram?, motd?, maxPlayers?, gamemode?, pvp?, onlineMode? }
+ */
+async function updateSettings(req, res, next) {
+  try {
+    const { name, port, ram, motd, maxPlayers, gamemode, pvp, onlineMode } = req.body;
+    const server = await serverService.updateServerSettings(req.params.id, {
+      name, port, ram, motd, maxPlayers, gamemode, pvp, onlineMode,
+    });
+    res.json({ data: server });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * POST /servers/:id/cancel-install
+ */
+async function cancelInstall(req, res, next) {
+  try {
+    serverService.cancelInstallServer(req.params.id);
+    res.status(202).json({ message: 'Installation cancellation requested' });
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function getLogs(req, res, next) {
+  try {
+    const logs = serverService.getServerLogs(req.params.id);
+    res.json({ data: logs });
+  } catch (err) {
+    next(err);
+  }
+}
+
+module.exports = { create, list, getOne, getLogs, start, stop, remove, reorder, cancelInstall, updateSettings };

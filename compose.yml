@@ -1,34 +1,34 @@
 services:
   yams:
-    image: momokabil/yams:latest
-    # Uncomment the line below (and remove or comment image:) to build from source instead.
-    # build: .
-    # host networking lets Minecraft servers bind their ports (25565, 25566, …)
-    # without declaring a fixed port range in advance.
-    network_mode: host
+    image: marocainperdu/yams:latest
+    ports:
+      # YAMS web UI — set YAMS_PORT in your .env to change the host port.
+      - "${YAMS_PORT:-3001}:3000"
+      # Minecraft server ports — one port per server you plan to run.
+      - "25565:25565"
+      - "25566:25566"
+      - "25567:25567"
     volumes:
-      - yams-data:/app/data      # yams.db + SQLite WAL files
-      - yams-servers:/app/servers # server JARs, worlds, configs, backups
+      - ./data:/app/data         # yams.db + SQLite WAL files
+      - ./servers:/app/servers   # server JARs, worlds, configs, backups
     environment:
       NODE_ENV: production
       PORT: 3000
-      # Binds to localhost only by default — access YAMS from the same machine.
-      # Set BIND_ADDRESS=0.0.0.0 (via .env) to expose it on the network,
-      # then put a TLS reverse-proxy (Caddy, nginx) in front of it.
-      BIND_ADDRESS: ${BIND_ADDRESS:-127.0.0.1}
+      # Bridge mode: the container must accept connections from Docker's bridge
+      # interface, so BIND_ADDRESS must be 0.0.0.0 inside the container.
+      BIND_ADDRESS: "0.0.0.0"
       YAMS_AUTH_ENABLED: "true"
       JWT_SECRET: ${JWT_SECRET}
       YAMS_ADMIN_USERNAME: ${YAMS_ADMIN_USERNAME}
       YAMS_ADMIN_PASSWORD: ${YAMS_ADMIN_PASSWORD}
+      # Optional — enables CurseForge modpack search (get a key at console.curseforge.com)
+      CURSEFORGE_API_KEY: ${CURSEFORGE_API_KEY:-}
     restart: unless-stopped
 
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:3000/health"]
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/health"]
       interval: 30s
       timeout: 5s
       retries: 3
       start_period: 10s
 
-volumes:
-  yams-data:
-  yams-servers:

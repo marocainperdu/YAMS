@@ -22,8 +22,15 @@ function getStmts() {
         `INSERT INTO servers (id, name, path, port, ram)
          VALUES (?, ?, ?, ?, ?)`
       ),
+      insertModpack: db.prepare(
+        `INSERT INTO servers (id, name, path, port, ram, status, modpack_platform, modpack_id, modpack_version)
+         VALUES (?, ?, ?, ?, ?, 'installing', ?, ?, ?)`
+      ),
       findAll: db.prepare(
-        `SELECT * FROM servers ORDER BY created_at DESC`
+        `SELECT * FROM servers ORDER BY priority ASC, created_at ASC`
+      ),
+      updatePriority: db.prepare(
+        `UPDATE servers SET priority = ?, updated_at = datetime('now') WHERE id = ?`
       ),
       findById: db.prepare(
         `SELECT * FROM servers WHERE id = ?`
@@ -38,6 +45,14 @@ function getStmts() {
         `UPDATE servers
          SET status = ?, pid = ?, updated_at = datetime('now')
          WHERE id = ?`
+      ),
+      updateInstallResult: db.prepare(
+        `UPDATE servers
+         SET status = ?, install_error = ?, updated_at = datetime('now')
+         WHERE id = ?`
+      ),
+      update: db.prepare(
+        `UPDATE servers SET name = ?, port = ?, ram = ?, java_version = ?, updated_at = datetime('now') WHERE id = ?`
       ),
       remove: db.prepare(
         `DELETE FROM servers WHERE id = ?`
@@ -56,6 +71,30 @@ function create(server) {
   const s = getStmts();
   s.insert.run(server.id, server.name, server.path, server.port, server.ram);
   return findById(server.id);
+}
+
+/**
+ * Insert a server record for a modpack install (status='installing').
+ * @param {{ id, name, path, port, ram, modpackPlatform, modpackId, modpackVersion }} server
+ * @returns {object} The created server row
+ */
+function createFromModpack(server) {
+  const s = getStmts();
+  s.insertModpack.run(
+    server.id, server.name, server.path, server.port, server.ram,
+    server.modpackPlatform, server.modpackId, server.modpackVersion
+  );
+  return findById(server.id);
+}
+
+/**
+ * Update the install result after a modpack install completes or fails.
+ * @param {string} id
+ * @param {'stopped'|'install_failed'} status
+ * @param {string|null} installError  — error message, or null on success
+ */
+function updateInstallResult(id, status, installError) {
+  getStmts().updateInstallResult.run(status, installError ?? null, id);
 }
 
 /** @returns {object[]} All server rows, newest first */
@@ -106,4 +145,23 @@ function remove(id) {
   getStmts().remove.run(id);
 }
 
-module.exports = { create, findAll, findById, findByPort, findByName, updateStatus, remove };
+/**
+ * Update name, port, and ram for a server.
+ * @param {string} id
+ * @param {{ name: string, port: number, ram: string }} fields
+ * @returns {object} Updated server row
+ */
+function update(id, { name, port, ram, javaVersion }) {
+  getStmts().update.run(name, port, ram, javaVersion ?? 'auto', id);
+  return findById(id);
+}
+
+function reorder(orderedIds) {
+  const db   = getDb();
+  const stmt = getStmts().updatePriority;
+  db.transaction((ids) => {
+    ids.forEach((id, index) => stmt.run(index, id));
+  })(orderedIds);
+}
+
+module.exports = { create, createFromModpack, findAll, findById, findByPort, findByName, updateStatus, updateInstallResult, update, remove, reorder };

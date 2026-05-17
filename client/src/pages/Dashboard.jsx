@@ -85,6 +85,8 @@ function ServerTable({ servers: propServers, navigate, reordering, onReorder }) 
         const isTogg = !!toggling[srv.id]
         const isRunning = srv.status === 'running'
         const isCrashed = srv.status === 'crashed'
+        const isInstalling = srv.status === 'installing'
+        const isInstallFailed = srv.status === 'install_failed'
 
         return (
           <div
@@ -94,7 +96,7 @@ function ServerTable({ servers: propServers, navigate, reordering, onReorder }) 
             onDragOver={reordering ? e => { e.preventDefault(); setOverIdx(i) } : undefined}
             onDrop={reordering ? () => handleDrop(i) : undefined}
             onDragEnd={reordering ? () => { setDragIdx(null); setOverIdx(null) } : undefined}
-            onClick={reordering ? undefined : () => navigate(`#/console/${srv.id}`)}
+            onClick={reordering ? undefined : () => navigate(`#/server/${srv.id}`)}
             onMouseEnter={() => setHovered(srv.id)}
             onMouseLeave={() => setHovered(null)}
             style={{
@@ -115,7 +117,9 @@ function ServerTable({ servers: propServers, navigate, reordering, onReorder }) 
             </div>
             <div style={{ width: '16%', display: 'flex', alignItems: 'center', gap: 6 }}>
               <StatusDot status={srv.status} />
-              <span style={{ fontSize: 12, color: statusColor(srv.status), fontWeight: 500, textTransform: 'capitalize' }}>{srv.status}</span>
+              <span style={{ fontSize: 12, color: statusColor(srv.status), fontWeight: 500, textTransform: 'capitalize' }}>
+                {srv.status === 'install_failed' ? 'Install Failed' : srv.status}
+              </span>
             </div>
             <div style={{ width: '16%', fontSize: 13, color: srv.clients > 0 ? C.text : C.dim, fontVariantNumeric: 'tabular-nums' }}>
               {srv.status === 'running' ? `${srv.clients} / ${srv.maxClients}` : '—'}
@@ -126,16 +130,28 @@ function ServerTable({ servers: propServers, navigate, reordering, onReorder }) 
             <div style={{ width: '20%', display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 8 }}>
               {!reordering && (
                 <button
-                  onClick={e => { e.stopPropagation(); navigate(`#/server/${srv.id}`) }}
+                  onClick={e => { e.stopPropagation(); navigate(`#/console/${srv.id}`) }}
                   style={{
                     fontSize: 11, fontWeight: 500, padding: '3px 10px', borderRadius: 4,
                     border: `1px solid ${C.border}`, background: 'transparent',
                     color: C.muted, cursor: 'pointer', transition: 'all 150ms',
                     opacity: isHov ? 1 : 0,
                   }}
-                >Manage</button>
+                >Console</button>
               )}
-              {!reordering && (() => {
+              {!reordering && isInstalling && (
+                <span style={{ fontSize: 11, fontWeight: 600, padding: '3px 10px', borderRadius: 4,
+                  border: `1px solid ${C.blue}55`, background: `${C.blue}18`, color: C.blue, flexShrink: 0 }}>
+                  Installing…
+                </span>
+              )}
+              {!reordering && isInstallFailed && (
+                <span style={{ fontSize: 11, fontWeight: 600, padding: '3px 10px', borderRadius: 4,
+                  border: `1px solid ${C.red}55`, background: `${C.red}18`, color: C.red, flexShrink: 0 }}>
+                  Failed
+                </span>
+              )}
+              {!reordering && !isInstalling && !isInstallFailed && (() => {
                 const label = isTogg ? '…' : isRunning ? 'Stop' : 'Start'
                 const bg = isRunning ? `${C.red}18` : `${C.green}18`
                 const border = isRunning ? `${C.red}55` : `${C.green}55`
@@ -302,7 +318,14 @@ export default function Dashboard({ navigate, extraServers = [] }) {
               servers={servers}
               navigate={navigate}
               reordering={reordering}
-              onReorder={ids => setServerOrder(ids)}
+              onReorder={async ids => {
+                setServerOrder(ids)
+                try {
+                  await apiFetch('/servers/reorder', { method: 'POST', body: JSON.stringify({ order: ids }) })
+                } catch (err) {
+                  console.error('[YAMS] Failed to save server order:', err)
+                }
+              }}
             />
           </div>
           <ActivityFeed logs={data.logs} />

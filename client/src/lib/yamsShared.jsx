@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import { C, statusColor } from '../styles/tokens'
 
 const API_PREFIX = '/api'
@@ -42,6 +42,7 @@ export function formatRelTime(ts) {
   return `${Math.floor(diff / 86400)}d ago`
 }
 
+
 export function apiUrl(path) {
   if (!path) return path
   if (path.startsWith('http://') || path.startsWith('https://')) return path
@@ -49,11 +50,36 @@ export function apiUrl(path) {
   return `${API_PREFIX}${path.startsWith('/') ? '' : '/'}${path}`
 }
 
+// Singleton promise: if a refresh is already in-flight, callers share it.
+let _refreshing = null
+
+async function doRefresh() {
+  const rt = sessionStorage.getItem('yams_refresh_token')
+  if (!rt) throw new Error('no_refresh_token')
+  const res = await fetch(apiUrl('/auth/refresh'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ refreshToken: rt }),
+  })
+  if (!res.ok) throw new Error('refresh_failed')
+  const body = await res.json()
+  sessionStorage.setItem('yams_token', body.data.token)
+  if (body.data.refreshToken) sessionStorage.setItem('yams_refresh_token', body.data.refreshToken)
+}
+
+function forceLogout() {
+  sessionStorage.removeItem('yams_token')
+  sessionStorage.removeItem('yams_refresh_token')
+  sessionStorage.removeItem('yams_user')
+  window.dispatchEvent(new CustomEvent('yams-auth-logout'))
+}
+
 export async function apiFetch(path, opts = {}) {
   const token = sessionStorage.getItem('yams_token')
   const method = opts.method || 'GET'
+  const isFormData = opts.body instanceof FormData
   const headers = {
-    'Content-Type': 'application/json',
+    ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
     ...(opts.headers || {}),
   }
@@ -68,10 +94,27 @@ export async function apiFetch(path, opts = {}) {
   console.log(`[YAMS] ← ${res.status} ${url}`, body)
 
   if (res.status === 401) {
-    sessionStorage.removeItem('yams_token')
-    sessionStorage.removeItem('yams_user')
-    window.dispatchEvent(new CustomEvent('yams-auth-logout'))
-    throw new Error('Session expired. Please sign in again.')
+    // Attempt a silent token refresh, then replay the original request once.
+    try {
+      if (!_refreshing) _refreshing = doRefresh().finally(() => { _refreshing = null })
+      await _refreshing
+    } catch {
+      forceLogout()
+      throw new Error('Session expired. Please sign in again.')
+    }
+
+    const newToken = sessionStorage.getItem('yams_token')
+    const retryRes = await fetch(url, { ...opts, headers: { ...headers, Authorization: `Bearer ${newToken}` } })
+    let retryBody
+    try { retryBody = await retryRes.json() } catch { retryBody = {} }
+
+    if (retryRes.status === 401) {
+      forceLogout()
+      throw new Error('Session expired. Please sign in again.')
+    }
+    if (retryRes.status === 403) throw new Error(retryBody.error || 'Access denied')
+    if (!retryRes.ok) throw new Error(retryBody.error || `HTTP ${retryRes.status}`)
+    return retryBody
   }
 
   if (res.status === 403) {
@@ -140,3 +183,72 @@ export function EmptyState({ message }) {
     </div>
   )
 }
+
+/**
+ * Number input with custom styled ▲/▼ spinner that matches the YAMS dark theme.
+ * Drop-in replacement for <input type="number"> — same props.
+ */
+export function NumberInput({ value, onChange, min, max, step = 1, placeholder, style, onFocus, onBlur }) {
+  const [focused, setFocused] = React.useState(false)
+  const [hovUp,   setHovUp]   = React.useState(false)
+  const [hovDn,   setHovDn]   = React.useState(false)
+
+  const adjust = (delta) => {
+    const current = value === '' || value == null ? (min ?? 0) : Number(value)
+    if (isNaN(current)) return
+    let next = current + delta
+    if (min != null) next = Math.max(Number(min), next)
+    if (max != null) next = Math.min(Number(max), next)
+    onChange({ target: { value: String(next) } })
+  }
+
+  const border = `1px solid ${focused ? C.blue : C.border}`
+  const btnBase = {
+    flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
+    background: 'none', border: 'none', cursor: 'pointer',
+    color: C.muted, fontSize: 9, lineHeight: 1, padding: 0, userSelect: 'none',
+  }
+
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'stretch',
+      background: C.surface2, border, borderRadius: 7,
+      overflow: 'hidden', transition: 'border-color 150ms',
+      ...(style || {}),
+    }}>
+      <input
+        type="number"
+        value={value}
+        onChange={onChange}
+        placeholder={placeholder}
+        min={min}
+        max={max}
+        step={step}
+        style={{
+          flex: 1, background: 'none', border: 'none',
+          padding: '9px 13px', fontSize: 14, color: C.text,
+          outline: 'none', minWidth: 0, width: '100%',
+        }}
+        onFocus={e => { setFocused(true);  onFocus && onFocus(e) }}
+        onBlur={e  => { setFocused(false); onBlur  && onBlur(e)  }}
+      />
+      <div style={{ display: 'flex', flexDirection: 'column', borderLeft: `1px solid ${C.border}`, width: 22 }}>
+        <button
+          type="button" tabIndex={-1}
+          onClick={() => adjust(step)}
+          onMouseEnter={() => setHovUp(true)}
+          onMouseLeave={() => setHovUp(false)}
+          style={{ ...btnBase, borderBottom: `1px solid ${C.border}`, background: hovUp ? `${C.blue}18` : 'none' }}
+        >▲</button>
+        <button
+          type="button" tabIndex={-1}
+          onClick={() => adjust(-step)}
+          onMouseEnter={() => setHovDn(true)}
+          onMouseLeave={() => setHovDn(false)}
+          style={{ ...btnBase, background: hovDn ? `${C.blue}18` : 'none' }}
+        >▼</button>
+      </div>
+    </div>
+  )
+}
+
