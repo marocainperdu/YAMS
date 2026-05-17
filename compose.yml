@@ -1,8 +1,6 @@
 services:
   yams:
-    build: .
-    # To use the published image instead of building from source, swap the lines below:
-    # image: momokabil/yams:latest
+    image: marocainperdu/yams:latest
     ports:
       # YAMS web UI — set YAMS_PORT in your .env to change the host port.
       - "${YAMS_PORT:-3001}:3000"

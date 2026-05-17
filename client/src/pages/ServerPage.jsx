@@ -1404,10 +1404,7 @@ function TabMods({ serverId, server }) {
     setUploading(true); setError(null);
     try {
       const fd = new FormData(); fd.append('file', file);
-      const token = sessionStorage.getItem('yams_token') ?? '';
-      const resp = await fetch(`/api/servers/${serverId}/mods/upload`, { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: fd });
-      const body = await resp.json().catch(() => ({}));
-      if (!resp.ok) throw new Error(body.error || `HTTP ${resp.status}`);
+      const body = await apiFetch(`/servers/${serverId}/mods/upload`, { method: 'POST', body: fd });
       flash(`Uploaded ${body.data?.filename}`); await loadMods();
     } catch (e) { setError(e.message); }
     finally { setUploading(false); }
@@ -1789,6 +1786,8 @@ function TabWebhooks({ serverId }) {
   const [loading,  setLoading] = React.useState(true);
   const [apiError, setApiError]= React.useState(null);
   const [modal,    setModal]   = React.useState(null); // null | 'new' | hook object
+  const [testing,  setTesting] = React.useState(null); // webhookId being tested
+  const [testMsg,  setTestMsg] = React.useState(null); // { id, ok, text }
 
   React.useEffect(() => {
     apiFetch(`/servers/${serverId}/webhooks`)
@@ -1835,6 +1834,20 @@ function TabWebhooks({ serverId }) {
     } catch (err) { return err.message; }
   }
 
+  async function handleTest(id) {
+    setTesting(id);
+    setTestMsg(null);
+    try {
+      await apiFetch(`/servers/${serverId}/webhooks/${id}/test`, { method: 'POST' });
+      setTestMsg({ id, ok: true, text: 'Test payload delivered' });
+    } catch (e) {
+      setTestMsg({ id, ok: false, text: e.message });
+    } finally {
+      setTesting(null);
+      setTimeout(() => setTestMsg(null), 5000);
+    }
+  }
+
   const eventColor = { 'server.start': C.green, 'server.stop': C.muted, 'server.crash': C.red };
 
   return (
@@ -1864,9 +1877,13 @@ function TabWebhooks({ serverId }) {
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                 <Toggle value={!!h.enabled} onChange={() => handleToggle(h)} />
                 <span style={{ fontSize: 12, fontFamily: "'JetBrains Mono', monospace", color: C.text, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{h.url}</span>
+                <button onClick={() => handleTest(h.id)} disabled={testing === h.id} style={{ fontSize: 11, padding: '3px 8px', borderRadius: 4, border: `1px solid ${C.blue}44`, background: 'transparent', color: C.blue, cursor: 'pointer', flexShrink: 0, opacity: testing === h.id ? 0.5 : 1 }}>{testing === h.id ? 'Sending…' : 'Test'}</button>
                 <button onClick={() => setModal(h)} style={{ fontSize: 11, padding: '3px 8px', borderRadius: 4, border: `1px solid ${C.border}`, background: 'transparent', color: C.muted, cursor: 'pointer', flexShrink: 0 }}>Edit</button>
                 <button onClick={() => handleDelete(h.id)} style={{ fontSize: 11, padding: '3px 8px', borderRadius: 4, border: `1px solid ${C.red}44`, background: 'transparent', color: C.red, cursor: 'pointer', flexShrink: 0 }}>Delete</button>
               </div>
+              {testMsg?.id === h.id && (
+                <div style={{ fontSize: 11, color: testMsg.ok ? C.green : C.red, marginTop: 2 }}>{testMsg.text}</div>
+              )}
               <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                 {h.events.map(ev => (
                   <span key={ev} style={{ fontSize: 10, padding: '2px 7px', borderRadius: 3, background: C.surface2, border: `1px solid ${(eventColor[ev] ?? C.muted) + '44'}`, color: eventColor[ev] ?? C.muted, fontFamily: "'JetBrains Mono', monospace" }}>{ev}</span>
@@ -1907,7 +1924,7 @@ function wsBaseUrlConsole() {
   return `${proto}//${window.location.host}/ws${query}`
 }
 
-function TabConsole({ serverId }) {
+function TabConsole({ serverId, onStatusChange }) {
   const termRef    = React.useRef(null)
   const xtermRef   = React.useRef(null)
   const fitRef     = React.useRef(null)
@@ -1981,8 +1998,9 @@ function TabConsole({ serverId }) {
         if (msg.type === 'status') {
           if (msg.data === 'subscribed') { setWsStatus('connected'); writeLine({ type: 'system', data: `── YAMS Console · ${msg.server || serverId} ──`, timestamp: Date.now() }) }
           else if (msg.data === 'pending') { setWsStatus('connecting'); writeLine({ type: 'system', data: 'Server is stopped — waiting for it to start…', timestamp: Date.now() }) }
-          else if (msg.data === 'started') { setWsStatus('connected'); writeLine({ type: 'system', data: '── Server started ──', timestamp: Date.now() }) }
-          else if (msg.data === 'stopped') { setWsStatus('lost'); writeLine({ type: 'system', data: '── Server stopped ──', timestamp: Date.now() }) }
+          else if (msg.data === 'started') { setWsStatus('connected'); writeLine({ type: 'system', data: '── Server started ──', timestamp: Date.now() }); onStatusChange?.('running') }
+          else if (msg.data === 'stopped') { setWsStatus('lost'); writeLine({ type: 'system', data: '── Server stopped ──', timestamp: Date.now() }); onStatusChange?.('stopped') }
+          else if (msg.data === 'crashed') { setWsStatus('lost'); writeLine({ type: 'system', data: '── Server crashed ──', timestamp: Date.now() }); onStatusChange?.('stopped') }
         } else if (msg.type === 'history') {
           // Skip WS history replay if REST pre-fetch already populated the terminal
           if (!historyShown) (msg.data || []).forEach(e => writeLine(e))
@@ -2316,7 +2334,7 @@ function ServerPage({ serverId, navigate }) {
   ];
 
   const tabContent = {
-    console:    <TabConsole   serverId={serverId} />,
+    console:    <TabConsole   serverId={serverId} onStatusChange={status => setServer(s => ({ ...s, status }))} />,
     worlds:     <TabWorlds    serverId={serverId} />,
     files:      <TabFiles     serverId={serverId} />,
     backups:    <TabBackups   serverId={serverId} />,

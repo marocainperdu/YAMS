@@ -1,9 +1,9 @@
 'use strict';
 
-const { v4: uuidv4 }    = require('uuid');
-const webhookModel      = require('../models/webhookModel');
-const serverModel       = require('../models/serverModel');
-const { VALID_EVENTS }  = require('../services/webhookService');
+const { v4: uuidv4 }         = require('uuid');
+const webhookModel           = require('../models/webhookModel');
+const serverModel            = require('../models/serverModel');
+const { VALID_EVENTS, fire } = require('../services/webhookService');
 const { badRequest, notFound } = require('../utils/errors');
 
 function isValidUrl(str) {
@@ -88,4 +88,20 @@ function format(hook) {
   };
 }
 
-module.exports = { list, create, update, remove };
+async function test(req, res, next) {
+  try {
+    const hook = webhookModel.findById(req.params.webhookId);
+    if (!hook) return next(notFound('Webhook not found'));
+    const server = serverModel.findById(req.params.id);
+    await fire(hook, {
+      event:      'server.test',
+      serverId:   hook.server_id,
+      serverName: server?.name ?? hook.server_id,
+      timestamp:  Date.now(),
+      test:       true,
+    });
+    res.json({ data: { delivered: true } });
+  } catch (err) { next(err); }
+}
+
+module.exports = { list, create, update, remove, test };

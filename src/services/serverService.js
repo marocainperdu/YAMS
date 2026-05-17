@@ -430,6 +430,11 @@ function startServer(id) {
     throw internal(`Started java but failed to save state to DB: ${err.message}`);
   }
 
+  // Always notify subscribers (webhooks, etc.) that the server started.
+  // This must fire unconditionally — the pending-client block below is only
+  // for promoting WS clients and would miss the event if no client is waiting.
+  streamEmitter.emit('status', { serverId: id, state: 'started', timestamp: Date.now() });
+
   // --- Process lifecycle event handlers ---
 
   // stdout: pipe to YAMS process stdout for local visibility, and push to the
@@ -503,6 +508,7 @@ function startServer(id) {
       timestamp: Date.now(),
     });
 
+    streamEmitter.emit('status', { serverId: id, state: CRASH_CLASSIFY.STARTUP_FAILURE, timestamp: Date.now() });
     broadcastToClients(id, { type: 'status', serverId: id, timestamp: Date.now(), data: CRASH_CLASSIFY.STARTUP_FAILURE });
     processes.delete(id);
     serverModel.updateStatus(id, 'stopped', null);
@@ -525,13 +531,6 @@ function startServer(id) {
       }
     }
     pendingClients.delete(id);
-
-    // Emit started event
-    streamEmitter.emit('status', {
-      serverId: id,
-      state: 'started',
-      timestamp: Date.now(),
-    });
 
     // Notify all promoted clients (buffer is empty at this point — server just started)
     broadcastToClients(id, { type: 'status', serverId: id, timestamp: Date.now(), data: 'started', server: server.name });
@@ -571,10 +570,10 @@ function stopServer(id) {
     // Mark that we're intentionally stopping (so exit handler knows it's not a crash)
     entry.stopping = true;
 
-    // Emit stop event for subscribers
+    // Emit stop event for subscribers (use NORMAL_STOP so webhook handler recognises it)
     streamEmitter.emit('status', {
       serverId: id,
-      state: 'stopping',
+      state: CRASH_CLASSIFY.NORMAL_STOP,
       timestamp: Date.now(),
     });
 

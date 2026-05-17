@@ -826,13 +826,7 @@ function ModUploadZone({ serverId, mods, onDone }) {
   async function uploadFile(file) {
     const form = new FormData()
     form.append('file', file)
-    const token = sessionStorage.getItem('yams_token') ?? ''
-    const res = await fetch(`/api/servers/${serverId}/mods/upload`, {
-      method: 'POST',
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-      body: form,
-    })
-    if (!res.ok) throw new Error(`Upload failed (${res.status})`)
+    await apiFetch(`/servers/${serverId}/mods/upload`, { method: 'POST', body: form })
   }
 
   async function handleFiles(files) {

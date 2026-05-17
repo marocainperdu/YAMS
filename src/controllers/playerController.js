@@ -60,6 +60,10 @@ function extractFields(v) {
 
 async function _getPlayerdataDir(server) {
   const levelName = await readLevelName(server.path);
+  // NeoForge 1.21+ stores player data at <world>/players/data/
+  const newStyle = path.join(server.path, levelName, 'players', 'data');
+  try { await fsp.access(newStyle); return newStyle; } catch {}
+  // Vanilla/legacy: <world>/playerdata/
   return path.join(server.path, levelName, 'playerdata');
 }
 

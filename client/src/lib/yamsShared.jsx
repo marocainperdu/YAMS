@@ -77,8 +77,9 @@ function forceLogout() {
 export async function apiFetch(path, opts = {}) {
   const token = sessionStorage.getItem('yams_token')
   const method = opts.method || 'GET'
+  const isFormData = opts.body instanceof FormData
   const headers = {
-    'Content-Type': 'application/json',
+    ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
     ...(opts.headers || {}),
   }
