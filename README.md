@@ -3,7 +3,7 @@
 > A self-hosted web UI and REST API for running and managing multiple Minecraft servers from a single browser tab.
 
 [![Build](https://img.shields.io/github/actions/workflow/status/marocainperdu/YAMS/docker.yml?branch=main&label=build)](https://github.com/marocainperdu/YAMS/actions)
-[![Docker Pulls](https://img.shields.io/docker/pulls/momokabil/yams)](https://hub.docker.com/r/momokabil/yams)
+[![Docker Pulls](https://img.shields.io/docker/pulls/marocainperdu/yams)](https://hub.docker.com/r/marocainperdu/yams)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%3E%3D22.5.0-brightgreen)](package.json)
 
@@ -146,19 +146,19 @@ Interactive docs (with try-it-out): `http://localhost:3000/api-docs`
 
 ## Docker Hub
 
-Pre-built images: [`momokabil/yams`](https://hub.docker.com/r/momokabil/yams)
+Pre-built images: [`marocainperdu/yams`](https://hub.docker.com/r/marocainperdu/yams)
 
 Images are built automatically on every push to `main` and on every version tag.
 
 To build from source instead of pulling, replace `image:` with `build: .` in `compose.yml`.
 
-The workflow builds `momokabil/yams:1.0.0`, `:1.0`, `:1`, and `:latest`.
+The workflow builds `marocainperdu/yams:1.0.0`, `:1.0`, `:1`, and `:latest`.
 
 ### Required GitHub secrets (maintainers)
 
 | Secret | Value |
 |---|---|
-| `DOCKERHUB_USERNAME` | `momokabil` |
+| `DOCKERHUB_USERNAME` | `marocainperdu` |
 | `DOCKERHUB_TOKEN` | Docker Hub access token (Account Settings › Security) |
 
 ---
