@@ -32,6 +32,7 @@ const webhookRoutes   = require('./src/routes/webhookRoutes');
 const playerRoutes    = require('./src/routes/playerRoutes');
 const modsRoutes      = require('./src/routes/modsRoutes');
 const { userRouter, permissionRouter } = require('./src/routes/userRoutes');
+const versionController = require('./src/controllers/versionController');
 const swaggerSpec = require('./src/swagger');
 const { createWsServer } = require('./src/websocket/wsServer');
 
@@ -63,6 +64,7 @@ app.use((req, _res, next) => {
 // ---------------------------------------------------------------------------
 
 app.get('/health', (_req, res) => res.json({ status: 'ok' }));
+app.get('/api/version', versionController.get);
 
 app.use('/api/auth/2fa',                twoFARoutes);
 app.use('/api/auth',                    authRoutes);

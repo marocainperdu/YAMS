@@ -215,9 +215,21 @@ function AvatarDropdown({ currentUser, navigate, onLogout }) {
   )
 }
 
+function useUpdateCheck() {
+  const [update, setUpdate] = React.useState(null) // null | { current, latest }
+  React.useEffect(() => {
+    apiFetch('/version').then(r => {
+      if (r?.data?.updateAvailable) setUpdate(r.data)
+    }).catch(() => {})
+  }, [])
+  return update
+}
+
 function AppNavBar({ currentUser, navigate, onLogout }) {
   const path = window.location.hash
   const isActive = (prefix) => path === prefix || path.startsWith(prefix + '/')
+  const _update = useUpdateCheck()
+  const update = currentUser?.role === 'admin' ? _update : null
 
   const navBtn = (label, href) => (
     <button
@@ -248,6 +260,22 @@ function AppNavBar({ currentUser, navigate, onLogout }) {
       }}>
         <span style={{ color: C.green, fontSize: 18, lineHeight: 1 }}>⬡</span>
         <span style={{ fontSize: 14, fontWeight: 700, color: C.text, letterSpacing: '-0.01em' }}>YAMS</span>
+        {update && (
+          <a
+            href={`https://github.com/marocainperdu/YAMS/releases/tag/v${update.latest}`}
+            target="_blank"
+            rel="noreferrer"
+            title={`Mise à jour disponible : v${update.latest} (actuel : v${update.current})`}
+            onClick={e => e.stopPropagation()}
+            style={{
+              fontSize: 10, fontWeight: 700, padding: '2px 6px', borderRadius: 10,
+              background: `${C.amber}22`, color: C.amber,
+              border: `1px solid ${C.amber}55`,
+              textDecoration: 'none', lineHeight: 1.4,
+              letterSpacing: '0.02em',
+            }}
+          >↑ v{update.latest}</a>
+        )}
       </button>
 
       {navBtn('Dashboard', '#/')}

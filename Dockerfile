@@ -40,7 +40,7 @@ WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 
 # Application source
-COPY app.js ./
+COPY app.js package.json ./
 COPY src/ ./src/
 
 # Built frontend served as static files by Express

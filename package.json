@@ -1,6 +1,6 @@
 {
   "name": "yams",
-  "version": "1.0.0",
+  "version": "0.2.0",
   "description": "Yet Another Minecraft Server Manager — local self-hosted server management API",
   "main": "app.js",
   "scripts": {
